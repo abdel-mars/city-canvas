@@ -21,12 +21,14 @@ export interface ColorPreset {
 }
 
 export type FontFamily = 'serif' | 'sans' | 'mono' | 'handwritten';
-export type TextPosition = 'bottom' | 'center' | 'top';
 
 export interface ArtworkSettings {
   preset: ColorPreset;
+  background: string;
+  road: string;
+  text: string;
   font: FontFamily;
-  textPosition: TextPosition;
+  textPositionY: number; // 0–100
   customName: string;
   showCustomName: boolean;
 }

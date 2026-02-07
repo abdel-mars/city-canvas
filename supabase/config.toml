@@ -1,1 +1,4 @@
 project_id = "lowigkocwiacsddynjiw"
+
+[functions.create-printify-product]
+verify_jwt = false

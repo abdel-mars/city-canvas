@@ -1,8 +1,10 @@
 import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { ChevronRight, Maximize2, Minimize2, Settings } from 'lucide-react';
 import CitySearch from '@/components/CitySearch';
 import ArtworkCanvas from '@/components/ArtworkCanvas';
 import ControlPanel from '@/components/ControlPanel';
+import BackgroundArt from '@/components/BackgroundArt';
 import { City, ArtworkSettings } from '@/types/artwork';
 import { colorPresets } from '@/lib/presets';
 import { useRoadData } from '@/hooks/useRoadData';
@@ -11,11 +13,16 @@ const Index = () => {
   const [selectedCity, setSelectedCity] = useState<City | null>(null);
   const [settings, setSettings] = useState<ArtworkSettings>({
     preset: colorPresets[0],
+    background: colorPresets[0].background,
+    road: colorPresets[0].road,
+    text: colorPresets[0].text,
     font: 'serif',
-    textPosition: 'bottom',
+    textPositionY: 90,
     customName: '',
     showCustomName: false,
   });
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const { roads, isLoading, error, loadRoads } = useRoadData();
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -25,17 +32,19 @@ const Index = () => {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background relative">
       <AnimatePresence mode="wait">
         {!selectedCity ? (
-          /* ── Empty state: centered search ── */
+          /* ── Landing: centered search + background art ── */
           <motion.div
             key="empty"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0, transition: { duration: 0.3 } }}
-            className="min-h-screen flex flex-col items-center justify-center px-6"
+            className="min-h-screen flex flex-col items-center justify-center px-6 relative z-10"
           >
+            <BackgroundArt />
+
             <motion.div
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
@@ -78,22 +87,38 @@ const Index = () => {
             className="min-h-screen flex flex-col"
           >
             {/* Header */}
-            <header className="flex items-center gap-4 px-5 py-3.5 border-b border-border">
-              <button
-                onClick={() => {
-                  setSelectedCity(null);
-                }}
-                className="text-lg font-display tracking-tight text-foreground hover:opacity-60 transition-opacity duration-200 shrink-0"
-              >
-                City Lines
-              </button>
-              <div className="flex-1 max-w-sm">
-                <CitySearch onSelect={handleCitySelect} compact />
-              </div>
-            </header>
+            {!isFullscreen && (
+              <header className="flex items-center gap-4 px-5 py-3.5 border-b border-border">
+                <button
+                  onClick={() => setSelectedCity(null)}
+                  className="text-lg font-display tracking-tight text-foreground hover:opacity-60 transition-opacity duration-200 shrink-0"
+                >
+                  City Lines
+                </button>
+                <div className="flex-1 max-w-sm">
+                  <CitySearch onSelect={handleCitySelect} compact />
+                </div>
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    onClick={() => setIsFullscreen(true)}
+                    className="p-2 rounded-lg border border-border hover:border-foreground/20 transition-colors"
+                    title="Fullscreen"
+                  >
+                    <Maximize2 className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                  <button
+                    onClick={() => setPanelOpen(!panelOpen)}
+                    className="p-2 rounded-lg border border-border hover:border-foreground/20 transition-colors lg:flex hidden"
+                    title="Toggle controls"
+                  >
+                    <Settings className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                </div>
+              </header>
+            )}
 
             {/* Main content */}
-            <main className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+            <main className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
               {/* Artwork area */}
               <div className="flex-1 flex items-center justify-center p-6 lg:p-10 min-h-0">
                 <ArtworkCanvas
@@ -102,7 +127,18 @@ const Index = () => {
                   roads={roads}
                   settings={settings}
                   isLoading={isLoading}
+                  isFullscreen={isFullscreen}
                 />
+
+                {/* Fullscreen exit button */}
+                {isFullscreen && (
+                  <button
+                    onClick={() => setIsFullscreen(false)}
+                    className="fixed top-6 right-6 z-[60] p-2.5 bg-white/10 backdrop-blur-md rounded-full hover:bg-white/20 transition-colors"
+                  >
+                    <Minimize2 className="w-5 h-5 text-white" />
+                  </button>
+                )}
               </div>
 
               {/* Error message */}
@@ -112,21 +148,41 @@ const Index = () => {
                 </div>
               )}
 
-              {/* Controls sidebar */}
-              <aside className="lg:w-72 xl:w-80 border-t lg:border-t-0 lg:border-l border-border bg-card/40 overflow-y-auto">
-                {error && (
-                  <div className="px-6 pt-6 hidden lg:block">
-                    <p className="text-sm text-muted-foreground">{error}</p>
-                  </div>
+              {/* Controls sidebar — collapsible on desktop */}
+              <AnimatePresence>
+                {panelOpen && !isFullscreen && (
+                  <motion.aside
+                    initial={{ width: 0, opacity: 0 }}
+                    animate={{ width: 'auto', opacity: 1 }}
+                    exit={{ width: 0, opacity: 0 }}
+                    transition={{ duration: 0.25, ease: 'easeInOut' }}
+                    className="lg:w-72 xl:w-80 border-t lg:border-t-0 lg:border-l border-border bg-card/40 overflow-y-auto overflow-x-hidden"
+                  >
+                    {error && (
+                      <div className="px-6 pt-6 hidden lg:block">
+                        <p className="text-sm text-muted-foreground">{error}</p>
+                      </div>
+                    )}
+                    <ControlPanel
+                      settings={settings}
+                      onSettingsChange={setSettings}
+                      svgRef={svgRef}
+                      cityName={selectedCity.name}
+                      hasRoads={roads.length > 0}
+                    />
+                  </motion.aside>
                 )}
-                <ControlPanel
-                  settings={settings}
-                  onSettingsChange={setSettings}
-                  svgRef={svgRef}
-                  cityName={selectedCity.name}
-                  hasRoads={roads.length > 0}
-                />
-              </aside>
+              </AnimatePresence>
+
+              {/* Mobile controls toggle */}
+              {!panelOpen && !isFullscreen && (
+                <button
+                  onClick={() => setPanelOpen(true)}
+                  className="lg:hidden fixed bottom-6 right-6 z-30 p-3 bg-foreground text-background rounded-full shadow-lg"
+                >
+                  <ChevronRight className="w-5 h-5 rotate-[-90deg]" />
+                </button>
+              )}
             </main>
           </motion.div>
         )}

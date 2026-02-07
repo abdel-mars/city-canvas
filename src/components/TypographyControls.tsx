@@ -1,28 +1,23 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { FontFamily, TextPosition } from '@/types/artwork';
+import { FontFamily } from '@/types/artwork';
 import { fontLabels, fontMap } from '@/lib/presets';
 
 interface TypographyControlsProps {
   font: FontFamily;
-  textPosition: TextPosition;
+  textPositionY: number;
   customName: string;
   showCustomName: boolean;
   onFontChange: (font: FontFamily) => void;
-  onPositionChange: (position: TextPosition) => void;
+  onPositionChange: (y: number) => void;
   onCustomNameChange: (name: string) => void;
   onShowCustomNameChange: (show: boolean) => void;
 }
 
 const fonts: FontFamily[] = ['serif', 'sans', 'mono', 'handwritten'];
-const positions: { value: TextPosition; label: string }[] = [
-  { value: 'top', label: 'Top' },
-  { value: 'center', label: 'Center' },
-  { value: 'bottom', label: 'Bottom' },
-];
 
 const TypographyControls = ({
   font,
-  textPosition,
+  textPositionY,
   customName,
   showCustomName,
   onFontChange,
@@ -55,25 +50,22 @@ const TypographyControls = ({
         </div>
       </div>
 
-      {/* Text position */}
+      {/* Text position slider */}
       <div className="space-y-3">
         <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-medium">
-          Position
+          Text position
         </span>
-        <div className="flex gap-2">
-          {positions.map(({ value, label }) => (
-            <button
-              key={value}
-              onClick={() => onPositionChange(value)}
-              className={`flex-1 px-3 py-2 rounded-lg text-xs font-medium border transition-all duration-200 ${
-                textPosition === value
-                  ? 'border-foreground bg-foreground text-background'
-                  : 'border-border hover:border-foreground/20'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] text-muted-foreground/60">Top</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={textPositionY}
+            onChange={(e) => onPositionChange(Number(e.target.value))}
+            className="flex-1 h-1.5 bg-secondary rounded-full appearance-none cursor-pointer accent-foreground [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground [&::-webkit-slider-thumb]:cursor-pointer"
+          />
+          <span className="text-[10px] text-muted-foreground/60">Bottom</span>
         </div>
       </div>
 

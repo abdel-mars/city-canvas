@@ -1,4 +1,4 @@
-import { ArtworkSettings, ColorPreset, FontFamily, TextPosition } from '@/types/artwork';
+import { ArtworkSettings, ColorPreset, FontFamily } from '@/types/artwork';
 import ColorPresets from './ColorPresets';
 import TypographyControls from './TypographyControls';
 import DownloadShare from './DownloadShare';
@@ -22,22 +22,37 @@ const ControlPanel = ({
     onSettingsChange({ ...settings, ...partial });
   };
 
+  const handlePresetSelect = (preset: ColorPreset) => {
+    update({
+      preset,
+      background: preset.background,
+      road: preset.road,
+      text: preset.text,
+    });
+  };
+
   return (
     <div className="space-y-6 p-6">
       <ColorPresets
         selected={settings.preset}
-        onSelect={(preset: ColorPreset) => update({ preset })}
+        onSelect={handlePresetSelect}
+        background={settings.background}
+        road={settings.road}
+        text={settings.text}
+        onBackgroundChange={(background: string) => update({ background })}
+        onRoadChange={(road: string) => update({ road })}
+        onTextChange={(text: string) => update({ text })}
       />
 
       <div className="border-t border-border" />
 
       <TypographyControls
         font={settings.font}
-        textPosition={settings.textPosition}
+        textPositionY={settings.textPositionY}
         customName={settings.customName}
         showCustomName={settings.showCustomName}
         onFontChange={(font: FontFamily) => update({ font })}
-        onPositionChange={(textPosition: TextPosition) => update({ textPosition })}
+        onPositionChange={(textPositionY: number) => update({ textPositionY })}
         onCustomNameChange={(customName: string) => update({ customName })}
         onShowCustomNameChange={(showCustomName: boolean) => update({ showCustomName })}
       />
@@ -48,7 +63,7 @@ const ControlPanel = ({
           <DownloadShare
             svgRef={svgRef}
             cityName={cityName}
-            textColor={settings.preset.text}
+            textColor={settings.text}
           />
         </>
       )}
