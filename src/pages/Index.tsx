@@ -82,10 +82,10 @@ const Index = () => {
               transition={{ delay: 0.15, duration: 0.6, ease: 'easeOut' }}
               className="text-center mb-10"
             >
-              <h1 className="text-5xl md:text-6xl font-display tracking-tight text-foreground mb-3">
+              <h1 className="text-5xl md:text-6xl font-display tracking-tight text-foreground mb-3" style={{ textShadow: '0 4px 24px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.15)' }}>
                 City Lines
               </h1>
-              <p className="text-muted-foreground text-lg font-light">
+              <p className="text-muted-foreground text-lg font-light" style={{ textShadow: '0 2px 12px rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.10)' }}>
                 Turn your city into art
               </p>
             </motion.div>
@@ -94,7 +94,7 @@ const Index = () => {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.35, duration: 0.6, ease: 'easeOut' }}
-              className="w-full max-w-md"
+              className="w-full max-w-md bg-white/60 backdrop-blur-md rounded-xl shadow-lg"
             >
               <CitySearch onSelect={handleCitySelect} />
             </motion.div>
