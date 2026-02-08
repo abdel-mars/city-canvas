@@ -12,7 +12,7 @@ const BackgroundArt = () => {
           pointerEvents: 'none',
           transform: 'scale(1.2)',
           objectPosition: 'center',
-          opacity: 0.5,
+          opacity: 0.25,
         }}
       />
     </div>

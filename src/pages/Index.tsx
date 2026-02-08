@@ -94,7 +94,7 @@ const Index = () => {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.35, duration: 0.6, ease: 'easeOut' }}
-              className="w-full max-w-md bg-white/60 backdrop-blur-md rounded-xl shadow-lg"
+              className="w-full max-w-md bg-white/40 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/20"
             >
               <CitySearch onSelect={handleCitySelect} />
             </motion.div>
