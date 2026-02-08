@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Download, Share2, Printer } from 'lucide-react';
-import { downloadArtwork, generateArtworkBase64 } from '@/lib/download';
+import { downloadArtwork, generateArtworkBase64, downloadSvg } from '@/lib/download';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -12,6 +12,7 @@ interface DownloadShareProps {
 
 const DownloadShare = ({ svgRef, cityName, textColor }: DownloadShareProps) => {
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isDownloadingSvg, setIsDownloadingSvg] = useState(false);
   const [isBuying, setIsBuying] = useState(false);
 
   const handleDownload = async () => {
@@ -26,6 +27,21 @@ const DownloadShare = ({ svgRef, cityName, textColor }: DownloadShareProps) => {
       toast.error('Download failed. Please try again.');
     } finally {
       setIsDownloading(false);
+    }
+  };
+
+  const handleDownloadSvg = async () => {
+    if (!svgRef.current || isDownloadingSvg) return;
+    setIsDownloadingSvg(true);
+    try {
+      const filename = cityName.toLowerCase().replace(/\s+/g, '-');
+      await downloadSvg(svgRef.current, filename);
+      toast.success('SVG downloaded');
+    } catch (e) {
+      console.error('SVG download failed:', e);
+      toast.error('SVG download failed. Please try again.');
+    } finally {
+      setIsDownloadingSvg(false);
     }
   };
 
@@ -110,6 +126,15 @@ const DownloadShare = ({ svgRef, cityName, textColor }: DownloadShareProps) => {
       >
         <Download className="w-4 h-4" />
         {isDownloading ? 'Preparing…' : 'Download'}
+      </button>
+
+      <button
+        onClick={handleDownloadSvg}
+        disabled={isDownloadingSvg}
+        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-border rounded-xl text-sm text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-all duration-200 disabled:opacity-50"
+      >
+        <Download className="w-4 h-4" />
+        {isDownloadingSvg ? 'Preparing SVG…' : 'Download SVG'}
       </button>
 
       <button

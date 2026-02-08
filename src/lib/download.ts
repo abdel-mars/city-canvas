@@ -126,3 +126,30 @@ export async function generateArtworkBase64(
     img.src = url;
   });
 }
+
+/** Download the artwork as a raw SVG file */
+export async function downloadSvg(svgElement: SVGSVGElement, filename: string): Promise<void> {
+  // Ensure fonts are loaded so text rendering is stable if the SVG references webfonts
+  await document.fonts.ready;
+
+  const svgClone = svgElement.cloneNode(true) as SVGSVGElement;
+  // Ensure xmlns exists so the file is a valid standalone SVG
+  if (!svgClone.getAttribute('xmlns')) {
+    svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  }
+
+  const serializer = new XMLSerializer();
+  let svgString = serializer.serializeToString(svgClone);
+  svgString = '<?xml version="1.0" encoding="UTF-8"?>\n' + svgString;
+
+  const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${filename}.svg`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
