@@ -30,7 +30,7 @@ const TypographyControls = ({
       {/* Font selection */}
       <div className="space-y-3">
         <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-medium">
-          Typography
+          Text
         </span>
         <div className="grid grid-cols-2 gap-2">
           {fonts.map((f) => (
@@ -53,7 +53,7 @@ const TypographyControls = ({
       {/* Text position slider */}
       <div className="space-y-3">
         <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-medium">
-          Text position
+          Position
         </span>
         <div className="flex items-center gap-3">
           <span className="text-[10px] text-muted-foreground/60">Top</span>
@@ -69,7 +69,7 @@ const TypographyControls = ({
         </div>
       </div>
 
-      {/* Custom name */}
+      {/* Custom name - Details section */}
       <div className="space-y-3">
         <label className="flex items-center gap-2.5 cursor-pointer select-none">
           <div
@@ -94,7 +94,7 @@ const TypographyControls = ({
             )}
           </div>
           <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-medium">
-            Personal touch
+            Details
           </span>
         </label>
 

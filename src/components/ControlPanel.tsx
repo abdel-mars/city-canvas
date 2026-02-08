@@ -1,3 +1,4 @@
+import { Maximize2, Minimize2 } from 'lucide-react';
 import { ArtworkSettings, ColorPreset, FontFamily } from '@/types/artwork';
 import ColorPresets from './ColorPresets';
 import TypographyControls from './TypographyControls';
@@ -9,6 +10,8 @@ interface ControlPanelProps {
   svgRef: React.RefObject<SVGSVGElement | null>;
   cityName: string;
   hasRoads: boolean;
+  isFullscreen: boolean;
+  onToggleFullscreen: () => void;
 }
 
 const ControlPanel = ({
@@ -17,6 +20,8 @@ const ControlPanel = ({
   svgRef,
   cityName,
   hasRoads,
+  isFullscreen,
+  onToggleFullscreen,
 }: ControlPanelProps) => {
   const update = (partial: Partial<ArtworkSettings>) => {
     onSettingsChange({ ...settings, ...partial });
@@ -60,6 +65,25 @@ const ControlPanel = ({
       {hasRoads && (
         <>
           <div className="border-t border-border" />
+
+          {/* Fullscreen toggle */}
+          <button
+            onClick={onToggleFullscreen}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 border border-border rounded-xl text-sm text-muted-foreground hover:text-foreground hover:border-foreground/20 transition-all duration-200"
+          >
+            {isFullscreen ? (
+              <>
+                <Minimize2 className="w-3.5 h-3.5" />
+                Exit fullscreen
+              </>
+            ) : (
+              <>
+                <Maximize2 className="w-3.5 h-3.5" />
+                Gallery view
+              </>
+            )}
+          </button>
+
           <DownloadShare
             svgRef={svgRef}
             cityName={cityName}

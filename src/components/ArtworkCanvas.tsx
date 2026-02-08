@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Road, ArtworkSettings, City } from '@/types/artwork';
 import { createProjection, getStrokeWidth } from '@/lib/projection';
 import { fontMap } from '@/lib/presets';
+import { Skeleton } from '@/components/ui/skeleton';
 
 interface ArtworkCanvasProps {
   city: City;
@@ -40,7 +41,6 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
       });
     }, [roads, project]);
 
-    // Map 0–100 slider to canvas Y
     const textY = 30 + (textPositionY / 100) * (CANVAS_SIZE - 55);
     const dominantBaseline =
       textPositionY < 20 ? 'hanging' : textPositionY > 80 ? 'auto' : 'central';
@@ -50,6 +50,39 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
 
     const fontSize = font === 'handwritten' ? 32 : 22;
     const letterSpacing = font === 'mono' ? 6 : font === 'sans' ? 4 : 2;
+
+    // Show skeleton while loading (no roads yet)
+    if (isLoading && roads.length === 0) {
+      return (
+        <motion.div
+          className="w-full flex items-center justify-center"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.4 }}
+        >
+          <div className="relative" style={{ maxHeight: '80vh', maxWidth: '80vh', aspectRatio: '1 / 1', width: '100%' }}>
+            <Skeleton className="w-full h-full rounded-xl" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="flex gap-2">
+                {[0, 1, 2].map((i) => (
+                  <motion.div
+                    key={i}
+                    className="w-1.5 h-1.5 rounded-full bg-muted-foreground"
+                    animate={{ opacity: [0.2, 0.6, 0.2] }}
+                    transition={{
+                      duration: 1.8,
+                      repeat: Infinity,
+                      delay: i * 0.25,
+                      ease: 'easeInOut',
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      );
+    }
 
     return (
       <motion.div
@@ -62,13 +95,23 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
         animate={{ opacity: 1 }}
         transition={{ duration: 0.6 }}
       >
+        {/* Gallery light — subtle radial glow behind canvas */}
+        {!isFullscreen && (
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background: 'radial-gradient(ellipse at center, hsl(var(--accent) / 0.06) 0%, transparent 70%)',
+            }}
+          />
+        )}
+
         <div
-          className={isFullscreen ? 'w-full h-full flex items-center justify-center' : ''}
+          className={isFullscreen ? 'w-full h-full flex items-center justify-center' : 'relative'}
           style={
             !isFullscreen
               ? {
                   boxShadow:
-                    '0 8px 40px -8px rgba(0,0,0,0.15), 0 2px 12px -4px rgba(0,0,0,0.08)',
+                    '0 12px 50px -10px rgba(0,0,0,0.20), 0 4px 16px -4px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04)',
                   borderRadius: '12px',
                 }
               : undefined
@@ -79,8 +122,8 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
             viewBox={`0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}`}
             className="w-full h-full rounded-lg"
             style={{
-              maxHeight: isFullscreen ? '92vh' : '72vh',
-              maxWidth: isFullscreen ? '92vh' : '72vh',
+              maxHeight: isFullscreen ? '92vh' : '80vh',
+              maxWidth: isFullscreen ? '92vh' : '80vh',
               aspectRatio: '1 / 1',
             }}
           >
@@ -143,33 +186,6 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
             )}
           </svg>
         </div>
-
-        {/* Loading overlay */}
-        {isLoading && (
-          <motion.div
-            className="absolute inset-0 flex items-center justify-center"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <div className="flex gap-2">
-              {[0, 1, 2].map((i) => (
-                <motion.div
-                  key={i}
-                  className="w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: text }}
-                  animate={{ opacity: [0.2, 0.7, 0.2] }}
-                  transition={{
-                    duration: 1.8,
-                    repeat: Infinity,
-                    delay: i * 0.25,
-                    ease: 'easeInOut',
-                  }}
-                />
-              ))}
-            </div>
-          </motion.div>
-        )}
       </motion.div>
     );
   },

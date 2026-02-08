@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Download, Share2, ShoppingBag } from 'lucide-react';
+import { Download, Share2, Printer } from 'lucide-react';
 import { downloadArtwork, generateArtworkBase64 } from '@/lib/download';
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 
 interface DownloadShareProps {
   svgRef: React.RefObject<SVGSVGElement | null>;
@@ -19,8 +20,10 @@ const DownloadShare = ({ svgRef, cityName, textColor }: DownloadShareProps) => {
     try {
       const filename = cityName.toLowerCase().replace(/\s+/g, '-');
       await downloadArtwork(svgRef.current, filename, textColor);
+      toast.success('Artwork downloaded');
     } catch (e) {
       console.error('Download failed:', e);
+      toast.error('Download failed. Please try again.');
     } finally {
       setIsDownloading(false);
     }
@@ -30,10 +33,8 @@ const DownloadShare = ({ svgRef, cityName, textColor }: DownloadShareProps) => {
     if (!svgRef.current || isBuying) return;
     setIsBuying(true);
     try {
-      // Generate high-res base64 PNG
       const base64 = await generateArtworkBase64(svgRef.current, 5);
 
-      // Call edge function to create Printify product
       const { data, error } = await supabase.functions.invoke('create-printify-product', {
         body: {
           image_base64: base64,
@@ -48,9 +49,11 @@ const DownloadShare = ({ svgRef, cityName, textColor }: DownloadShareProps) => {
         window.open(data.product_url, '_blank');
       } else if (data?.error) {
         console.error('Printify error:', data.error);
+        toast.error('Could not create product. Please try again.');
       }
     } catch (e) {
       console.error('Buy failed:', e);
+      toast.error('Something went wrong. Please try again.');
     } finally {
       setIsBuying(false);
     }
@@ -59,20 +62,33 @@ const DownloadShare = ({ svgRef, cityName, textColor }: DownloadShareProps) => {
   const handleShare = async () => {
     const shareData = {
       title: `${cityName} — City Lines`,
-      text: `A road-only artwork of ${cityName}.`,
+      text: `Check out this road-network artwork of ${cityName}, made with City Lines.`,
       url: window.location.href,
     };
 
-    if (navigator.share) {
-      try {
+    try {
+      if (navigator.share) {
         await navigator.share(shareData);
-      } catch (_e) {
-        // User cancelled share
+        return;
       }
-    } else {
-      await navigator.clipboard.writeText(
-        `${shareData.text} ${shareData.url}`
-      );
+    } catch (e) {
+      // User cancelled or share API failed — fall through to clipboard
+      if ((e as Error).name === 'AbortError') return;
+    }
+
+    // Fallback: copy to clipboard
+    try {
+      await navigator.clipboard.writeText(`${shareData.text} ${shareData.url}`);
+      toast.success('Link copied to clipboard');
+    } catch {
+      // Final fallback
+      const textArea = document.createElement('textarea');
+      textArea.value = `${shareData.text} ${shareData.url}`;
+      document.body.appendChild(textArea);
+      textArea.select();
+      document.execCommand('copy');
+      document.body.removeChild(textArea);
+      toast.success('Link copied to clipboard');
     }
   };
 
@@ -83,8 +99,8 @@ const DownloadShare = ({ svgRef, cityName, textColor }: DownloadShareProps) => {
         disabled={isBuying}
         className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-accent text-accent-foreground rounded-xl text-sm font-medium hover:opacity-90 transition-opacity duration-200 disabled:opacity-50"
       >
-        <ShoppingBag className="w-4 h-4" />
-        {isBuying ? 'Creating poster...' : 'Buy as poster'}
+        <Printer className="w-4 h-4" />
+        {isBuying ? 'Preparing your print…' : 'Print your city'}
       </button>
 
       <button
@@ -93,7 +109,7 @@ const DownloadShare = ({ svgRef, cityName, textColor }: DownloadShareProps) => {
         className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-foreground text-background rounded-xl text-sm font-medium hover:opacity-90 transition-opacity duration-200 disabled:opacity-50"
       >
         <Download className="w-4 h-4" />
-        {isDownloading ? 'Preparing...' : 'Download'}
+        {isDownloading ? 'Preparing…' : 'Download'}
       </button>
 
       <button

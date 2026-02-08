@@ -19,6 +19,11 @@ serve(async (req) => {
       throw new Error("PRINTIFY_API_KEY is not configured");
     }
 
+    const STORE_DOMAIN = Deno.env.get("PRINTIFY_STORE_DOMAIN");
+    if (!STORE_DOMAIN) {
+      throw new Error("PRINTIFY_STORE_DOMAIN is not configured");
+    }
+
     const { image_base64, title, description } = await req.json();
     if (!image_base64) {
       return new Response(
@@ -73,7 +78,6 @@ serve(async (req) => {
     }
     const blueprints = await catalogRes.json();
 
-    // Search for poster/art print blueprint
     const posterBlueprint = blueprints.find(
       (bp: any) =>
         bp.title.toLowerCase().includes("poster") &&
@@ -118,23 +122,10 @@ serve(async (req) => {
       throw new Error("No variants found");
     }
 
-    // Pick a mid-size variant (or the first)
     const selectedVariants = variants.slice(0, Math.min(variants.length, 5));
     console.log(`Selected ${selectedVariants.length} variants`);
 
-    // 6. Get print areas / placeholders
-    const shippingRes = await fetch(
-      `${PRINTIFY_BASE}/catalog/blueprints/${posterBlueprint.id}/print_providers/${provider.id}/shipping.json`,
-      { headers }
-    );
-    // Don't fail on shipping, it's optional info
-    if (shippingRes.ok) {
-      await shippingRes.json();
-    } else {
-      await shippingRes.text();
-    }
-
-    // 7. Create the product
+    // 6. Create the product
     console.log("Creating product...");
     const productPayload = {
       title: title || "City Lines Art Poster",
@@ -145,7 +136,7 @@ serve(async (req) => {
       print_provider_id: provider.id,
       variants: selectedVariants.map((v: any) => ({
         id: v.id,
-        price: 2999, // $29.99 in cents
+        price: 2999,
         is_enabled: true,
       })),
       print_areas: [
@@ -184,7 +175,7 @@ serve(async (req) => {
     const product = await productRes.json();
     console.log(`Product created: ${product.id}`);
 
-    // 8. Publish the product
+    // 7. Publish the product to the Pop-Up Store
     console.log("Publishing product...");
     const publishRes = await fetch(
       `${PRINTIFY_BASE}/shops/${shopId}/products/${product.id}/publish.json`,
@@ -205,13 +196,14 @@ serve(async (req) => {
     if (!publishRes.ok) {
       const body = await publishRes.text();
       console.warn(`Publish warning [${publishRes.status}]: ${body}`);
-      // Don't fail — product is still created
     } else {
-      await publishRes.json();
+      const publishData = await publishRes.json();
+      console.log("Product published successfully:", JSON.stringify(publishData));
     }
 
-    // Build product URL (Printify dashboard link)
-    const productUrl = `https://printify.com/app/editor/${product.id}`;
+    // 8. Construct the Pop-Up Store product URL
+    const productUrl = `https://${STORE_DOMAIN}.printify.me/product/${product.id}`;
+    console.log(`Product URL: ${productUrl}`);
 
     return new Response(
       JSON.stringify({

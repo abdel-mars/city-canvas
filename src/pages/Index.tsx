@@ -1,10 +1,11 @@
 import { useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronRight, Maximize2, Minimize2, Settings } from 'lucide-react';
+import { ChevronRight, Minimize2 } from 'lucide-react';
 import CitySearch from '@/components/CitySearch';
 import ArtworkCanvas from '@/components/ArtworkCanvas';
 import ControlPanel from '@/components/ControlPanel';
 import BackgroundArt from '@/components/BackgroundArt';
+import MenuToggle from '@/components/MenuToggle';
 import { City, ArtworkSettings } from '@/types/artwork';
 import { colorPresets } from '@/lib/presets';
 import { useRoadData } from '@/hooks/useRoadData';
@@ -98,21 +99,8 @@ const Index = () => {
                 <div className="flex-1 max-w-sm">
                   <CitySearch onSelect={handleCitySelect} compact />
                 </div>
-                <div className="flex items-center gap-2 ml-auto">
-                  <button
-                    onClick={() => setIsFullscreen(true)}
-                    className="p-2 rounded-lg border border-border hover:border-foreground/20 transition-colors"
-                    title="Fullscreen"
-                  >
-                    <Maximize2 className="w-4 h-4 text-muted-foreground" />
-                  </button>
-                  <button
-                    onClick={() => setPanelOpen(!panelOpen)}
-                    className="p-2 rounded-lg border border-border hover:border-foreground/20 transition-colors lg:flex hidden"
-                    title="Toggle controls"
-                  >
-                    <Settings className="w-4 h-4 text-muted-foreground" />
-                  </button>
+                <div className="ml-auto">
+                  <MenuToggle isOpen={panelOpen} onToggle={() => setPanelOpen(!panelOpen)} />
                 </div>
               </header>
             )}
@@ -120,7 +108,7 @@ const Index = () => {
             {/* Main content */}
             <main className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
               {/* Artwork area */}
-              <div className="flex-1 flex items-center justify-center p-6 lg:p-10 min-h-0">
+              <div className="flex-1 flex items-center justify-center p-4 lg:p-8 min-h-0">
                 <ArtworkCanvas
                   ref={svgRef}
                   city={selectedCity}
@@ -148,7 +136,7 @@ const Index = () => {
                 </div>
               )}
 
-              {/* Controls sidebar — collapsible on desktop */}
+              {/* Controls sidebar — collapsible */}
               <AnimatePresence>
                 {panelOpen && !isFullscreen && (
                   <motion.aside
@@ -169,6 +157,8 @@ const Index = () => {
                       svgRef={svgRef}
                       cityName={selectedCity.name}
                       hasRoads={roads.length > 0}
+                      isFullscreen={isFullscreen}
+                      onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
                     />
                   </motion.aside>
                 )}
