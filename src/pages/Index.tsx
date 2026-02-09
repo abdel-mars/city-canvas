@@ -85,7 +85,7 @@ const Index = () => {
               <h1 className="text-5xl md:text-6xl font-display tracking-tight text-foreground mb-3" style={{ textShadow: '0 4px 24px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.15)' }}>
                 City Lines
               </h1>
-              <p className="text-muted-foreground text-lg font-light" style={{ textShadow: '0 2px 12px rgba(0,0,0,0.25), 0 1px 2px rgba(0,0,0,0.10)' }}>
+              <p className="text-muted-foreground text-lg font-light">
                 Turn your city into art
               </p>
             </motion.div>

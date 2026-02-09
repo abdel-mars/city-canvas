@@ -86,11 +86,10 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
 
     return (
       <motion.div
-        className={`relative flex items-center justify-center ${
-          isFullscreen
-            ? 'fixed inset-0 z-50 bg-black/90 p-6'
-            : 'w-full'
-        }`}
+        className={`relative flex items-center justify-center ${isFullscreen
+          ? 'fixed inset-0 z-50 bg-black/90 p-6'
+          : 'w-auto h-full'
+          }`}
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.6 }}
@@ -110,10 +109,14 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
           style={
             !isFullscreen
               ? {
-                  boxShadow:
-                    '0 12px 50px -10px rgba(0,0,0,0.20), 0 4px 16px -4px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04)',
-                  borderRadius: '12px',
-                }
+                width: 'min(90vh, 95vw, 800px)',
+                height: 'min(90vh, 95vw, 800px)',
+                maxWidth: '100%',
+                maxHeight: '100%',
+                boxShadow:
+                  '0 12px 50px -10px rgba(0,0,0,0.20), 0 4px 16px -4px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04)',
+                borderRadius: '12px',
+              }
               : undefined
           }
         >
@@ -122,8 +125,6 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
             viewBox={`0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}`}
             className="w-full h-full rounded-lg"
             style={{
-              maxHeight: isFullscreen ? '92vh' : '80vh',
-              maxWidth: isFullscreen ? '92vh' : '80vh',
               aspectRatio: '1 / 1',
             }}
           >
