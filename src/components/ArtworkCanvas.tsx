@@ -10,14 +10,13 @@ interface ArtworkCanvasProps {
   roads: Road[];
   settings: ArtworkSettings;
   isLoading: boolean;
-  isFullscreen?: boolean;
 }
 
 const CANVAS_SIZE = 800;
 const PADDING = 60;
 
 const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
-  ({ city, roads, settings, isLoading, isFullscreen }, ref) => {
+  ({ city, roads, settings, isLoading }, ref) => {
     const { background, road, text, font, textPositionY, customName, showCustomName, preset } = settings;
 
     const project = useMemo(() => {
@@ -86,39 +85,30 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
 
     return (
       <motion.div
-        className={`relative flex items-center justify-center ${isFullscreen
-          ? 'fixed inset-0 z-50 bg-black/90 p-6'
-          : 'w-auto h-full'
-          }`}
+        className="relative flex items-center justify-center w-auto h-full"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ duration: 0.6 }}
       >
         {/* Gallery light — subtle radial glow behind canvas */}
-        {!isFullscreen && (
-          <div
-            className="absolute inset-0 pointer-events-none"
-            style={{
-              background: 'radial-gradient(ellipse at center, hsl(var(--accent) / 0.06) 0%, transparent 70%)',
-            }}
-          />
-        )}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: 'radial-gradient(ellipse at center, hsl(var(--accent) / 0.06) 0%, transparent 70%)',
+          }}
+        />
 
         <div
-          className={isFullscreen ? 'w-full h-full flex items-center justify-center' : 'relative'}
-          style={
-            !isFullscreen
-              ? {
-                width: 'min(90vh, 95vw, 800px)',
-                height: 'min(90vh, 95vw, 800px)',
-                maxWidth: '100%',
-                maxHeight: '100%',
-                boxShadow:
-                  '0 12px 50px -10px rgba(0,0,0,0.20), 0 4px 16px -4px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04)',
-                borderRadius: '12px',
-              }
-              : undefined
-          }
+          className="relative"
+          style={{
+            width: 'min(90vh, 95vw, 800px)',
+            height: 'min(90vh, 95vw, 800px)',
+            maxWidth: '100%',
+            maxHeight: '100%',
+            boxShadow:
+              '0 12px 50px -10px rgba(0,0,0,0.20), 0 4px 16px -4px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04)',
+            borderRadius: '12px',
+          }}
         >
           <svg
             ref={ref}
@@ -129,7 +119,7 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
             }}
           >
             {/* Background */}
-            <rect width={CANVAS_SIZE} height={CANVAS_SIZE} fill={background} rx={isFullscreen ? 0 : 8} />
+            <rect width={CANVAS_SIZE} height={CANVAS_SIZE} fill={background} rx={8} />
 
             {/* Neon glow filter */}
             {preset.isNeon && (
