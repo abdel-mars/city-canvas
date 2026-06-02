@@ -10,13 +10,14 @@ interface ArtworkCanvasProps {
   roads: Road[];
   settings: ArtworkSettings;
   isLoading: boolean;
+  transparent?: boolean;
 }
 
 const CANVAS_SIZE = 800;
 const PADDING = 60;
 
 const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
-  ({ city, roads, settings, isLoading }, ref) => {
+  ({ city, roads, settings, isLoading, transparent = false }, ref) => {
     const { background, road, text, font, textPositionY, customName, showCustomName, preset } = settings;
 
     const project = useMemo(() => {
@@ -28,16 +29,28 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
       });
     }, [city.boundingBox]);
 
-    const paths = useMemo(() => {
-      return roads.map((r) => {
+    const groupedPaths = useMemo(() => {
+      const groups: Record<number, string[]> = {};
+      
+      roads.forEach((r) => {
+        const strokeWidth = getStrokeWidth(r.type);
         const d = r.geometry
           .map((p, i) => {
             const [x, y] = project(p.lat, p.lon);
             return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
           })
           .join(' ');
-        return { id: r.id, d, type: r.type };
+          
+        if (!groups[strokeWidth]) {
+          groups[strokeWidth] = [];
+        }
+        groups[strokeWidth].push(d);
       });
+      
+      return Object.entries(groups).map(([width, dArray]) => ({
+        strokeWidth: parseFloat(width),
+        d: dArray.join(' '),
+      }));
     }, [roads, project]);
 
     const textY = 30 + (textPositionY / 100) * (CANVAS_SIZE - 55);
@@ -108,6 +121,13 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
             boxShadow:
               '0 12px 50px -10px rgba(0,0,0,0.20), 0 4px 16px -4px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04)',
             borderRadius: '12px',
+            // Checkered pattern when transparent mode is active
+            ...(transparent && {
+              backgroundImage:
+                'repeating-conic-gradient(#c0c0c0 0% 25%, #f0f0f0 0% 50%)',
+              backgroundSize: '20px 20px',
+              backgroundPosition: '0 0',
+            }),
           }}
         >
           <svg
@@ -118,8 +138,16 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
               aspectRatio: '1 / 1',
             }}
           >
-            {/* Background */}
-            <rect width={CANVAS_SIZE} height={CANVAS_SIZE} fill={background} rx={8} />
+            {/* Background — hidden in transparent mode */}
+            {!transparent && (
+              <rect
+                width={CANVAS_SIZE}
+                height={CANVAS_SIZE}
+                fill={background}
+                rx={8}
+                style={{ transition: 'fill 0.4s ease' }}
+              />
+            )}
 
             {/* Neon glow filter */}
             {preset.isNeon && (
@@ -143,15 +171,16 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
               animate={{ opacity: roads.length > 0 ? 1 : 0 }}
               transition={{ duration: 1, delay: 0.2 }}
             >
-              {paths.map(({ id, d, type }) => (
+              {groupedPaths.map(({ strokeWidth, d }) => (
                 <path
-                  key={id}
+                  key={strokeWidth}
                   d={d}
                   fill="none"
                   stroke={road}
-                  strokeWidth={getStrokeWidth(type)}
+                  strokeWidth={strokeWidth}
                   strokeLinecap="round"
                   strokeLinejoin="round"
+                  style={{ transition: 'stroke 0.4s ease' }}
                 />
               ))}
             </motion.g>
@@ -171,6 +200,7 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 0.8, delay: 0.6 }}
+                style={{ transition: 'fill 0.4s ease' }}
               >
                 {displayText.toUpperCase()}
               </motion.text>

@@ -9,6 +9,7 @@ interface ControlPanelProps {
   svgRef: React.RefObject<SVGSVGElement | null>;
   cityName: string;
   hasRoads: boolean;
+  onTransparentChange: (value: boolean) => void;
 }
 
 const ControlPanel = ({
@@ -17,6 +18,7 @@ const ControlPanel = ({
   svgRef,
   cityName,
   hasRoads,
+  onTransparentChange,
 }: ControlPanelProps) => {
   const update = (partial: Partial<ArtworkSettings>) => {
     onSettingsChange({ ...settings, ...partial });
@@ -64,7 +66,9 @@ const ControlPanel = ({
           <DownloadShare
             svgRef={svgRef}
             cityName={cityName}
+            settings={settings}
             textColor={settings.text}
+            onTransparentChange={onTransparentChange}
           />
         </>
       )}

@@ -2,3 +2,6 @@ project_id = "lowigkocwiacsddynjiw"
 
 [functions.create-printify-product]
 verify_jwt = false
+
+[functions.create-share]
+verify_jwt = false

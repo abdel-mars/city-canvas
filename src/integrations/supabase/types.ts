@@ -14,7 +14,76 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      profiles: {
+        Row: {
+          id: string
+          username: string
+          avatar_url: string | null
+          updated_at: string
+        }
+        Insert: {
+          id: string
+          username: string
+          avatar_url?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          username?: string
+          avatar_url?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profiles_id_fkey"
+            columns: ["id"]
+            isOneToOne: true
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      shares: {
+        Row: {
+          id: string
+          city_name: string
+          image_url: string
+          settings_json: Json
+          created_at: string
+          user_id: string | null
+          creator_name: string
+          creator_email: string | null
+        }
+        Insert: {
+          id?: string
+          city_name: string
+          image_url: string
+          settings_json?: Json
+          created_at?: string
+          user_id?: string | null
+          creator_name?: string
+          creator_email?: string | null
+        }
+        Update: {
+          id?: string
+          city_name?: string
+          image_url?: string
+          settings_json?: Json
+          created_at?: string
+          user_id?: string | null
+          creator_name?: string
+          creator_email?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shares_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
     }
     Views: {
       [_ in never]: never
