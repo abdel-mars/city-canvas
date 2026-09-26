@@ -372,14 +372,19 @@ function redis(): Redis | null {
   return redisClient;
 }
 
-/** Single key, long TTL, freshness decided by the embedded timestamp. */
+/**
+ * Single key, long TTL, freshness decided by the embedded timestamp.
+ *
+ * The SDK serialises and deserialises JSON itself, so the value is stored and read as a plain
+ * object. Wrapping it in JSON.stringify here and parsing on read was the original bug: the SDK
+ * had already parsed it, so JSON.parse received an object and threw.
+ */
 async function cacheGet<T>(key: string, freshTtlSec: number): Promise<CacheHit<T> | null> {
   const r = redis();
   if (r) {
     try {
-      const raw = (await r.get(key)) as string | null;
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as { t: number; v: T };
+      const parsed = (await r.get<{ t: number; v: T }>(key)) ?? null;
+      if (!parsed) return null;
       return { value: parsed.v, fresh: Math.floor(Date.now() / 1000) - parsed.t < freshTtlSec };
     } catch (err) {
       console.warn('cache read failed, continuing without it:', err instanceof Error ? err.message : err);
@@ -392,7 +397,6 @@ async function cacheGet<T>(key: string, freshTtlSec: number): Promise<CacheHit<T
     memory.delete(key);
     return null;
   }
-  // Unwrap the same { t, v } envelope the Redis path uses, so both backends behave identically.
   const parsed = JSON.parse(hit.value) as { t: number; v: T };
   return { value: parsed.v, fresh: Date.now() < hit.freshUntil };
 }
@@ -403,12 +407,10 @@ async function cacheSet(
   freshTtlSec: number,
   staleTtlSec: number,
 ): Promise<void> {
-  const payload = JSON.stringify({ t: Math.floor(Date.now() / 1000), v: value });
-
   const r = redis();
   if (r) {
     try {
-      await r.set(key, payload, { ex: staleTtlSec });
+      await r.set(key, { t: Math.floor(Date.now() / 1000), v: value }, { ex: staleTtlSec });
       return;
     } catch (err) {
       console.warn('cache write failed, continuing without it:', err instanceof Error ? err.message : err);
@@ -421,6 +423,7 @@ async function cacheSet(
     const oldest = memory.keys().next().value;
     if (oldest !== undefined) memory.delete(oldest);
   }
+  const payload = JSON.stringify({ t: Math.floor(Date.now() / 1000), v: value });
   memory.set(key, { value: payload, freshUntil: now + freshTtlSec * 1000, staleUntil: now + staleTtlSec * 1000 });
 }
 
