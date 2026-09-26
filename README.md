@@ -1,6 +1,4 @@
 <h1 align="center">
-  <img src="docs/hero.png" alt="Casablanca rendered as a minimalist street network" width="420" />
-  <br />
   <strong>City Lines</strong>
   <br />
   <em>Turn your city into minimalist street-network art.</em>
