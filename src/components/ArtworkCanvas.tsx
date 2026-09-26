@@ -121,10 +121,10 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
             boxShadow:
               '0 12px 50px -10px rgba(0,0,0,0.20), 0 4px 16px -4px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04)',
             borderRadius: '12px',
-            // Checkered pattern when transparent mode is active
+            // Dot pattern when transparent mode is active
             ...(transparent && {
               backgroundImage:
-                'repeating-conic-gradient(#c0c0c0 0% 25%, #f0f0f0 0% 50%)',
+                'radial-gradient(circle, #d4d4d4 1px, transparent 1px)',
               backgroundSize: '20px 20px',
               backgroundPosition: '0 0',
             }),

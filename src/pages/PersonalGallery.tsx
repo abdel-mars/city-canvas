@@ -45,8 +45,8 @@ export const PersonalGallery: React.FC = () => {
   // Sync profile values into form
   useEffect(() => {
     if (profile) {
-      setPrintLink((profile as any).print_link || "");
-      setBio((profile as any).bio || "");
+      setPrintLink(profile.print_link || "");
+      setBio(profile.bio || "");
     }
   }, [profile]);
 

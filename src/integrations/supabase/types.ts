@@ -20,18 +20,24 @@ export type Database = {
           username: string
           avatar_url: string | null
           updated_at: string
+          print_link: string | null
+          bio: string | null
         }
         Insert: {
           id: string
           username: string
           avatar_url?: string | null
           updated_at?: string
+          print_link?: string | null
+          bio?: string | null
         }
         Update: {
           id?: string
           username?: string
           avatar_url?: string | null
           updated_at?: string
+          print_link?: string | null
+          bio?: string | null
         }
         Relationships: [
           {
@@ -53,6 +59,7 @@ export type Database = {
           user_id: string | null
           creator_name: string
           creator_email: string | null
+          is_published: boolean
         }
         Insert: {
           id?: string
@@ -63,6 +70,7 @@ export type Database = {
           user_id?: string | null
           creator_name?: string
           creator_email?: string | null
+          is_published?: boolean
         }
         Update: {
           id?: string
@@ -73,6 +81,7 @@ export type Database = {
           user_id?: string | null
           creator_name?: string
           creator_email?: string | null
+          is_published?: boolean
         }
         Relationships: [
           {

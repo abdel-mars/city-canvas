@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, ShieldCheck } from "lucide-react";
@@ -6,54 +6,76 @@ import { toast } from "sonner";
 
 export const AuthCallback: React.FC = () => {
   const navigate = useNavigate();
+  const handledRef = useRef(false);
 
   useEffect(() => {
-    async function handleAuthCallback() {
-      try {
-        // Supabase JS SDK automatically handles parsing the code/tokens from hash/query in URL
-        const { data: { session }, error } = await supabase.auth.getSession();
+    if (handledRef.current) return;
 
-        if (error) {
-          throw error;
+    async function handleSession(session: any) {
+      if (handledRef.current) return;
+      handledRef.current = true;
+
+      if (!session?.user) return;
+
+      const requestedUsername = session.user.user_metadata?.username;
+
+      if (requestedUsername) {
+        const { error: profileError } = await supabase
+          .from("profiles")
+          .upsert(
+            {
+              id: session.user.id,
+              username: requestedUsername,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "id" }
+          );
+
+        if (profileError) {
+          console.error("Failed to insert/update profile:", profileError);
         }
-
-        if (session?.user) {
-          const user = session.user;
-          const requestedUsername = user.user_metadata?.username;
-
-          // If a custom username was specified during signup, create/upsert their profile
-          if (requestedUsername) {
-            const { error: profileError } = await supabase
-              .from("profiles")
-              .upsert(
-                {
-                  id: user.id,
-                  username: requestedUsername,
-                  updated_at: new Date().toISOString(),
-                },
-                { onConflict: "id" }
-              );
-
-            if (profileError) {
-              console.error("Failed to insert/update profile:", profileError);
-            }
-          }
-
-          toast.success("Identity verified successfully! Welcome back.");
-          // Check if there was a saved redirect, otherwise go to gallery
-          navigate("/gallery");
-        } else {
-          // If no session found, redirect back to home page
-          navigate("/");
-        }
-      } catch (err: any) {
-        console.error("Authentication callback error:", err);
-        toast.error(err.message || "Email verification failed or link expired.");
-        navigate("/");
       }
+
+      // Link any anonymous shares created with this email to the user
+      if (session.user.email) {
+        await supabase
+          .from("shares")
+          .update({ user_id: session.user.id })
+          .eq("creator_email", session.user.email)
+          .is("user_id", null);
+      }
+
+      toast.success("Identity verified successfully! Welcome back.");
+      navigate("/gallery");
     }
 
-    handleAuthCallback();
+    // 1. Listen for auth state changes (handles PKCE code exchange)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_IN' && session) {
+        handleSession(session);
+      }
+    });
+
+    // 2. Also try getSession immediately (session may already exist)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        handleSession(session);
+      }
+    });
+
+    // 3. Timeout fallback — if neither fires, redirect to home
+    const timer = setTimeout(() => {
+      if (!handledRef.current) {
+        handledRef.current = true;
+        toast.error("Verification link expired or invalid. Please try again.");
+        navigate("/");
+      }
+    }, 15000);
+
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(timer);
+    };
   }, [navigate]);
 
   return (
