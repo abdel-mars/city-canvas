@@ -62,8 +62,8 @@ const UPSTREAM_TIMEOUT_MS = 25_000;
 const REDIS_TIMEOUT_MS = 4_000;
 
 const EPSILON = 0.00005; // ~5 m at the equator
-const MAX_WAYS = 3000;
-const MAX_POINTS = 200_000;
+const MAX_WAYS = 12_000;
+const MAX_POINTS = 400_000;
 
 const ROADS_FRESH_TTL = 7 * 24 * 60 * 60;
 const ROADS_STALE_TTL = 30 * 24 * 60 * 60;
@@ -72,8 +72,12 @@ const SEARCH_STALE_TTL = 90 * 24 * 60 * 60;
 
 const REQUESTS_PER_HOUR = 60;
 
+/**
+ * Slip roads (`*_link`) are excluded on purpose: they are short motorway ramps that dominate
+ * the way count while adding visual clutter rather than readable structure.
+ */
 const HIGHWAY_RE =
-  '^(motorway|trunk|primary|secondary|tertiary|residential|unclassified|living_street|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$';
+  '^(motorway|trunk|primary|secondary|tertiary|residential|unclassified|living_street)$';
 
 // ── Configuration ───────────────────────────────────────────────────────────
 
@@ -350,23 +354,35 @@ interface CacheHit<T> {
 const memory = new Map<string, { value: string; freshUntil: number; staleUntil: number }>();
 const MEMORY_MAX = 200;
 
+/**
+ * Runs a Redis command batch. The pipeline endpoint is used for everything because the
+ * path-style `/set/{key}/ex/{ttl}` form is rejected with a 400 by Upstash.
+ */
+async function redisPipeline(
+  redis: { url: string; token: string },
+  commands: unknown[][],
+): Promise<unknown[]> {
+  const res = await fetch(`${redis.url}/pipeline`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${redis.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(commands),
+    signal: AbortSignal.timeout(REDIS_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`[${res.status}]`);
+  const body = (await res.json()) as { result?: unknown[] };
+  return body.result ?? [];
+}
+
 async function cacheGet<T>(key: string): Promise<CacheHit<T> | null> {
   const redis = redisConfig();
   if (redis) {
     try {
-      const auth = { Authorization: `Bearer ${redis.token}` };
-      for (const [suffix, fresh] of [
-        ['', true],
-        [':stale', false],
-      ] as [string, boolean][]) {
-        const res = await fetch(`${redis.url}/get/${encodeURIComponent(key + suffix)}`, {
-          headers: auth,
-          signal: AbortSignal.timeout(REDIS_TIMEOUT_MS),
-        });
-        if (!res.ok) continue;
-        const body = (await res.json()) as { result: string | null };
-        if (body.result) return { value: JSON.parse(body.result) as T, fresh };
-      }
+      const [fresh, stale] = await redisPipeline(redis, [
+        ['GET', key],
+        ['GET', `${key}:stale`],
+      ]);
+      if (typeof fresh === 'string') return { value: JSON.parse(fresh) as T, fresh: true };
+      if (typeof stale === 'string') return { value: JSON.parse(stale) as T, fresh: false };
       return null;
     } catch (err) {
       console.warn('cache read failed, continuing without it:', err instanceof Error ? err.message : err);
@@ -393,20 +409,10 @@ async function cacheSet(
 
   if (redis) {
     try {
-      const writes = await Promise.all([
-        [key, freshTtlSec],
-        [`${key}:stale`, staleTtlSec],
-      ].map(([k, ttl]) =>
-        fetch(`${redis.url}/set/${encodeURIComponent(k as string)}/ex/${ttl}`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${redis.token}`, 'Content-Type': 'application/json' },
-          body: payload,
-          signal: AbortSignal.timeout(REDIS_TIMEOUT_MS),
-        }),
-      ));
-      for (const w of writes) {
-        if (!w.ok) throw new Error(`[${w.status}]`);
-      }
+      await redisPipeline(redis, [
+        ['SET', key, payload, 'EX', freshTtlSec],
+        ['SET', `${key}:stale`, payload, 'EX', staleTtlSec],
+      ]);
       return;
     } catch (err) {
       console.warn('cache write failed, continuing without it:', err instanceof Error ? err.message : err);
@@ -478,7 +484,7 @@ function buildRoadsQuery(bbox: [number, number, number, number]): string {
 }
 
 function roadsCacheKey(bbox: [number, number, number, number]): string {
-  return `geo:roads:v2:${bbox.map((n) => n.toFixed(4)).join(',')}`;
+  return `geo:roads:v3:${bbox.map((n) => n.toFixed(4)).join(',')}`;
 }
 
 function safeParse(raw: string): unknown {
