@@ -1,7 +1,28 @@
 {
-  "name": "vite_react_shadcn_ts",
+  "name": "city-lines",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Turn your city into minimalist street-network art, built on OpenStreetMap data.",
+  "license": "MIT",
+  "homepage": "https://citylines-art.vercel.app/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abdel-mars/city-canvas.git"
+  },
+  "bugs": {
+    "url": "https://github.com/abdel-mars/city-canvas/issues"
+  },
+  "keywords": [
+    "openstreetmap",
+    "overpass",
+    "map",
+    "generative-art",
+    "poster",
+    "svg",
+    "printify",
+    "vite",
+    "react"
+  ],
   "type": "module",
   "scripts": {
     "dev": "vite",

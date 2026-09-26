@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="City Lines">
+  <rect width="512" height="512" rx="112" fill="#111111"/>
+  <g fill="#ffffff">
+    <rect x="112" y="230" width="288" height="52" rx="26"/>
+    <rect x="230" y="112" width="52" height="288" rx="26"/>
+    <rect x="112" y="340" width="208" height="40" rx="20"/>
+    <rect x="352" y="152" width="40" height="248" rx="20"/>
+  </g>
+</svg>
