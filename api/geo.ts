@@ -17,6 +17,8 @@
  * POST /api/geo  { kind: 'search', q: string }
  */
 
+import { Redis } from '@upstash/redis';
+
 export interface ApiRequest {
   method?: string;
   headers: Record<string, string | string[] | undefined>;
@@ -58,8 +60,10 @@ const OVERPASS_MIRRORS = [
 
 const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 
-const UPSTREAM_TIMEOUT_MS = 25_000;
-const REDIS_TIMEOUT_MS = 4_000;
+// Overpass is often saturated. Measured worst case was 42s because a busy mirror consumed the
+// full 25s before failing over. A busy mirror is still busy 8s later, so fail over quickly.
+const UPSTREAM_TIMEOUT_MS = 8_000;
+const NOMINATIM_TIMEOUT_MS = 12_000;
 
 const EPSILON = 0.00005; // ~5 m at the equator
 const MAX_WAYS = 12_000;
@@ -71,6 +75,9 @@ const SEARCH_FRESH_TTL = 30 * 24 * 60 * 60;
 const SEARCH_STALE_TTL = 90 * 24 * 60 * 60;
 
 const REQUESTS_PER_HOUR = 60;
+
+/** Largest accepted bounding-box span, in degrees. Roughly a large metropolitan area. */
+const MAX_BBOX_SPAN = 0.35;
 
 /**
  * Slip roads (`*_link`) are excluded on purpose: they are short motorway ramps that dominate
@@ -93,12 +100,6 @@ export function userAgent(): string {
   return `CityLines/1.0 (${contact})`;
 }
 
-function redisConfig(): { url: string; token: string } | null {
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  return url && token ? { url, token } : null;
-}
-
 // ── Validation ──────────────────────────────────────────────────────────────
 
 export function isValidBbox(value: unknown): boolean {
@@ -110,8 +111,10 @@ export function isValidBbox(value: unknown): boolean {
   const east = value[3] as number;
   if (south < -90 || north > 90 || west < -180 || east > 180) return false;
   if (south >= north || west >= east) return false;
-  // A continent-sized query would hammer the upstream; no real city needs more than this.
-  if (north - south > 1.5 || east - west > 1.5) return false;
+  // Nominatim returns administrative areas, some of which are metro-sized (a Porto result was
+  // 0.47 x 0.91 degrees). Those produce queries big enough to time out, so they are rejected
+  // rather than silently taking 30s+ and returning a partial result.
+  if (north - south > MAX_BBOX_SPAN || east - west > MAX_BBOX_SPAN) return false;
   return true;
 }
 
@@ -223,7 +226,7 @@ async function fetchNominatim(query: string): Promise<unknown> {
   const res = await fetchWithTimeout(
     url,
     { headers: { 'User-Agent': userAgent(), 'Accept-Language': 'en' } },
-    UPSTREAM_TIMEOUT_MS,
+    NOMINATIM_TIMEOUT_MS,
   );
   if (!res.ok) throw new Error(`nominatim=${res.status}`);
   return res.json();
@@ -355,35 +358,29 @@ const memory = new Map<string, { value: string; freshUntil: number; staleUntil: 
 const MEMORY_MAX = 200;
 
 /**
- * Runs a Redis command batch. The pipeline endpoint is used for everything because the
- * path-style `/set/{key}/ex/{ttl}` form is rejected with a 400 by Upstash.
+ * Redis client, created lazily and memoised. Uses the official SDK rather than hand-rolled REST
+ * calls: Upstash answers HTTP 200 even when a command fails (the error is inside the result
+ * array), which made hand-rolled calls fail silently.
  */
-async function redisPipeline(
-  redis: { url: string; token: string },
-  commands: unknown[][],
-): Promise<unknown[]> {
-  const res = await fetch(`${redis.url}/pipeline`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${redis.token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(commands),
-    signal: AbortSignal.timeout(REDIS_TIMEOUT_MS),
-  });
-  if (!res.ok) throw new Error(`[${res.status}]`);
-  const body = (await res.json()) as { result?: unknown[] };
-  return body.result ?? [];
+let redisClient: Redis | null | undefined;
+
+function redis(): Redis | null {
+  if (redisClient !== undefined) return redisClient;
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  redisClient = url && token ? new Redis({ url, token }) : null;
+  return redisClient;
 }
 
-async function cacheGet<T>(key: string): Promise<CacheHit<T> | null> {
-  const redis = redisConfig();
-  if (redis) {
+/** Single key, long TTL, freshness decided by the embedded timestamp. */
+async function cacheGet<T>(key: string, freshTtlSec: number): Promise<CacheHit<T> | null> {
+  const r = redis();
+  if (r) {
     try {
-      const [fresh, stale] = await redisPipeline(redis, [
-        ['GET', key],
-        ['GET', `${key}:stale`],
-      ]);
-      if (typeof fresh === 'string') return { value: JSON.parse(fresh) as T, fresh: true };
-      if (typeof stale === 'string') return { value: JSON.parse(stale) as T, fresh: false };
-      return null;
+      const raw = (await r.get(key)) as string | null;
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { t: number; v: T };
+      return { value: parsed.v, fresh: Math.floor(Date.now() / 1000) - parsed.t < freshTtlSec };
     } catch (err) {
       console.warn('cache read failed, continuing without it:', err instanceof Error ? err.message : err);
       return null;
@@ -395,7 +392,9 @@ async function cacheGet<T>(key: string): Promise<CacheHit<T> | null> {
     memory.delete(key);
     return null;
   }
-  return { value: JSON.parse(hit.value) as T, fresh: Date.now() < hit.freshUntil };
+  // Unwrap the same { t, v } envelope the Redis path uses, so both backends behave identically.
+  const parsed = JSON.parse(hit.value) as { t: number; v: T };
+  return { value: parsed.v, fresh: Date.now() < hit.freshUntil };
 }
 
 async function cacheSet(
@@ -404,15 +403,12 @@ async function cacheSet(
   freshTtlSec: number,
   staleTtlSec: number,
 ): Promise<void> {
-  const payload = JSON.stringify(value);
-  const redis = redisConfig();
+  const payload = JSON.stringify({ t: Math.floor(Date.now() / 1000), v: value });
 
-  if (redis) {
+  const r = redis();
+  if (r) {
     try {
-      await redisPipeline(redis, [
-        ['SET', key, payload, 'EX', freshTtlSec],
-        ['SET', `${key}:stale`, payload, 'EX', staleTtlSec],
-      ]);
+      await r.set(key, payload, { ex: staleTtlSec });
       return;
     } catch (err) {
       console.warn('cache write failed, continuing without it:', err instanceof Error ? err.message : err);
@@ -434,26 +430,17 @@ async function rateLimited(
   key: string,
   limit: number,
 ): Promise<{ limited: boolean; retryAfter: number }> {
-  const redis = redisConfig();
+  const r = redis();
   // Fail open. The cache is the real load protection, and a Redis outage must not take the
   // site's core feature down with it.
-  if (!redis) return { limited: false, retryAfter: 0 };
+  if (!r) return { limited: false, retryAfter: 0 };
 
   try {
     const window = new Date().toISOString().slice(0, 13);
-    const res = await fetch(`${redis.url}/pipeline`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${redis.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify([
-        ['INCR', `geo:rl:${key}:${window}`],
-        ['EXPIRE', `geo:rl:${key}:${window}`, 7200],
-      ]),
-      signal: AbortSignal.timeout(REDIS_TIMEOUT_MS),
-    });
-    if (!res.ok) throw new Error(`[${res.status}]`);
-
-    const results = (await res.json()) as [number, unknown];
-    if (Number(results[0]) > limit) {
+    const redisKey = `geo:rl:${key}:${window}`;
+    const count = await r.incr(redisKey);
+    if (count === 1) await r.expire(redisKey, 7200);
+    if (count > limit) {
       return { limited: true, retryAfter: 3600 - (Date.now() % 3_600_000) / 1000 };
     }
     return { limited: false, retryAfter: 0 };
@@ -480,7 +467,7 @@ function singleFlight<T>(key: string, fn: () => Promise<T>): Promise<T> {
 
 function buildRoadsQuery(bbox: [number, number, number, number]): string {
   const [south, west, north, east] = bbox;
-  return `[out:json][timeout:20][maxsize:8388608];(way["highway"~"${HIGHWAY_RE}"](${south},${west},${north},${east}););out geom;`;
+  return `[out:json][timeout:7][maxsize:8388608];(way["highway"~"${HIGHWAY_RE}"](${south},${west},${north},${east}););out geom;`;
 }
 
 function roadsCacheKey(bbox: [number, number, number, number]): string {
@@ -507,7 +494,7 @@ async function handleRoads(
   const bbox = rawBbox as [number, number, number, number];
   const key = roadsCacheKey(bbox);
 
-  const cached = await cacheGet<CompactRoad[]>(key);
+  const cached = await cacheGet<CompactRoad[]>(key, ROADS_FRESH_TTL);
   if (cached?.fresh) {
     res.status(200).json({ roads: cached.value, cached: true });
     return;
@@ -528,7 +515,7 @@ async function handleRoads(
 
   try {
     const roads = await singleFlight(key, async () => {
-      const again = await cacheGet<CompactRoad[]>(key);
+      const again = await cacheGet<CompactRoad[]>(key, ROADS_FRESH_TTL);
       if (again?.fresh) return again.value;
       const data = await fetchOverpass(buildRoadsQuery(bbox));
       const { roads: list } = transformRoads(data);
@@ -554,7 +541,7 @@ async function handleSearch(
   }
 
   const key = `geo:search:v2:${q.toLowerCase()}`;
-  const cached = await cacheGet<City[]>(key);
+  const cached = await cacheGet<City[]>(key, SEARCH_FRESH_TTL);
   if (cached?.fresh) {
     res.status(200).json({ cities: cached.value, cached: true });
     return;
@@ -574,7 +561,7 @@ async function handleSearch(
 
   try {
     const cities = await singleFlight(key, async () => {
-      const again = await cacheGet<City[]>(key);
+      const again = await cacheGet<City[]>(key, SEARCH_FRESH_TTL);
       if (again?.fresh) return again.value;
       const data = (await fetchNominatim(q)) as NominatimResult[];
       const list = (Array.isArray(data) ? data : [])

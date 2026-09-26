@@ -86,6 +86,7 @@ describe('isValidBbox', () => {
     ['inverted north', [39, 2, 38, 3]],
     ['inverted east', [1, 5, 2, 4]],
     ['continent-sized', [10, 10, 40, 40]],
+    ['metro-sized (Nominatim can return these)', [41.0, -8.79, 41.47, -7.87]],
     ['not an array', 'nope'],
     ['null', null],
   ])('rejects %s', (_label, value) => {
