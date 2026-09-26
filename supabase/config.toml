@@ -1,7 +1,7 @@
+# NOTE: project_id below is stale and must be updated to your live Supabase project ref.
 project_id = "lowigkocwiacsddynjiw"
 
-[functions.create-printify-product]
-verify_jwt = false
-
 [functions.create-share]
-verify_jwt = false
+# Requires a valid Supabase JWT. The function also verifies the token in code and
+# derives user identity from it, so a body-supplied user_id is ignored.
+verify_jwt = true
