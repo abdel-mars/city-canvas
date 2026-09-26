@@ -1,0 +1,622 @@
+/**
+ * Geo proxy for OpenStreetMap data: road networks (Overpass) and place search (Nominatim).
+ *
+ * Why server-side rather than straight from the browser:
+ *  - `User-Agent` is a forbidden header name in the Fetch spec, so browsers silently drop it.
+ *    Overpass blocks browser clients by design, replying with a 406 whose error page carries no
+ *    CORS headers, so the failure surfaces in the console as a misleading CORS error.
+ *  - `overpass-api.de` is frequently overloaded and increasingly refuses whole client ranges, so
+ *    a single endpoint is not a dependency we can trust. We fan out across mirrors.
+ *  - Caching here means a given city is fetched upstream once, for everyone.
+ *
+ * This is deliberately one self-contained function with no relative imports: Vercel's function
+ * build resolves relative specifiers under node16 semantics (package.json is
+ * "type": "module"), which rejects extensionless relative paths at runtime.
+ *
+ * POST /api/geo  { kind: 'roads',  bbox: [south, west, north, east] }
+ * POST /api/geo  { kind: 'search', q: string }
+ */
+
+export interface ApiRequest {
+  method?: string;
+  headers: Record<string, string | string[] | undefined>;
+  body?: unknown;
+}
+
+export interface ApiResponse {
+  status(code: number): ApiResponse;
+  setHeader(name: string, value: string): void;
+  json(body: unknown): void;
+  end(): void;
+}
+
+/** Compact point: [lat, lon]. Much smaller on the wire than { lat, lon } objects. */
+type Point = [number, number];
+
+interface CompactRoad {
+  id: number;
+  type: string;
+  geometry: Point[];
+}
+
+interface City {
+  name: string;
+  displayName: string;
+  lat: number;
+  lon: number;
+  boundingBox: [number, number, number, number]; // south, west, north, east
+}
+
+const OVERPASS_MIRRORS = [
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://z.overpass-api.de/api/interpreter',
+  'https://lz4.overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
+];
+
+const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
+
+const UPSTREAM_TIMEOUT_MS = 25_000;
+const REDIS_TIMEOUT_MS = 4_000;
+
+const EPSILON = 0.00005; // ~5 m at the equator
+const MAX_WAYS = 3000;
+const MAX_POINTS = 200_000;
+
+const ROADS_FRESH_TTL = 7 * 24 * 60 * 60;
+const ROADS_STALE_TTL = 30 * 24 * 60 * 60;
+const SEARCH_FRESH_TTL = 30 * 24 * 60 * 60;
+const SEARCH_STALE_TTL = 90 * 24 * 60 * 60;
+
+const REQUESTS_PER_HOUR = 60;
+
+const HIGHWAY_RE =
+  '^(motorway|trunk|primary|secondary|tertiary|residential|unclassified|living_street|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link)$';
+
+// ── Configuration ───────────────────────────────────────────────────────────
+
+/**
+ * Overpass's operators permanently ban clients that do not identify themselves, and require a
+ * contact address. There is deliberately no default.
+ */
+export function userAgent(): string {
+  const contact = (process.env.GEOCONTACT ?? '').trim();
+  if (!contact) {
+    throw new Error('GEOCONTACT is not configured; refusing to call Overpass unidentified');
+  }
+  return `CityLines/1.0 (${contact})`;
+}
+
+function redisConfig(): { url: string; token: string } | null {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  return url && token ? { url, token } : null;
+}
+
+// ── Validation ──────────────────────────────────────────────────────────────
+
+export function isValidBbox(value: unknown): boolean {
+  if (!Array.isArray(value) || value.length !== 4) return false;
+  if (!value.every((n) => typeof n === 'number' && Number.isFinite(n))) return false;
+  const south = value[0] as number;
+  const west = value[1] as number;
+  const north = value[2] as number;
+  const east = value[3] as number;
+  if (south < -90 || north > 90 || west < -180 || east > 180) return false;
+  if (south >= north || west >= east) return false;
+  // A continent-sized query would hammer the upstream; no real city needs more than this.
+  if (north - south > 1.5 || east - west > 1.5) return false;
+  return true;
+}
+
+/** Strips control characters and collapses whitespace before the query leaves our server. */
+export function normaliseQuery(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  // The character class is intentional: search input is untrusted and must not carry control
+  // bytes into the upstream query string.
+  // eslint-disable-next-line no-control-regex
+  const cleaned = raw.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (cleaned.length < 2 || cleaned.length > 90) return null;
+  return cleaned;
+}
+
+/** Extracts the caller's IP, trusting only the entry Vercel appended on the right. */
+export function clientIp(headers: ApiRequest['headers']): string {
+  const pick = (name: string): string | null => {
+    const v = headers[name] ?? headers[name.toLowerCase()];
+    return Array.isArray(v) ? (v[0] ?? null) : (v ?? null);
+  };
+  const rightmost = (raw: string | null): string | null => {
+    if (!raw) return null;
+    const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    if (parts.length === 0) return null;
+    const value = parts[parts.length - 1];
+    return /^[0-9a-f:.]{3,45}$/i.test(value) ? value : null;
+  };
+  return (
+    rightmost(pick('x-vercel-forwarded-for')) ??
+    rightmost(pick('x-forwarded-for')) ??
+    rightmost(pick('x-real-ip')) ??
+    'unknown'
+  );
+}
+
+// ── Upstream ────────────────────────────────────────────────────────────────
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Remembers the mirror that last worked so we stop re-probing known-dead hosts every request. */
+let preferredMirror: string | null = null;
+
+function mirrorOrder(): string[] {
+  if (!preferredMirror) return OVERPASS_MIRRORS;
+  return [preferredMirror, ...OVERPASS_MIRRORS.filter((m) => m !== preferredMirror)];
+}
+
+async function fetchOverpass(query: string): Promise<unknown> {
+  const failures: string[] = [];
+
+  for (const mirror of mirrorOrder()) {
+    try {
+      const res = await fetchWithTimeout(
+        mirror,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': userAgent(),
+          },
+          body: `data=${encodeURIComponent(query)}`,
+        },
+        UPSTREAM_TIMEOUT_MS,
+      );
+
+      if (!res.ok) {
+        failures.push(`${hostOf(mirror)}=${res.status}`);
+        continue;
+      }
+
+      const data = (await res.json()) as unknown;
+      if (preferredMirror !== mirror) {
+        console.log(`overpass: preferred mirror is now ${hostOf(mirror)}`);
+      }
+      preferredMirror = mirror;
+      return data;
+    } catch (err) {
+      failures.push(`${hostOf(mirror)}=${err instanceof Error ? err.message : 'error'}`);
+    }
+  }
+
+  throw new Error(`all Overpass mirrors failed: ${failures.join(' ')}`);
+}
+
+async function fetchNominatim(query: string): Promise<unknown> {
+  const url = `${NOMINATIM_URL}?${new URLSearchParams({
+    q: query,
+    format: 'jsonv2',
+    addressdetails: '1',
+    limit: '5',
+  }).toString()}`;
+
+  const res = await fetchWithTimeout(
+    url,
+    { headers: { 'User-Agent': userAgent(), 'Accept-Language': 'en' } },
+    UPSTREAM_TIMEOUT_MS,
+  );
+  if (!res.ok) throw new Error(`nominatim=${res.status}`);
+  return res.json();
+}
+
+// ── Simplification ──────────────────────────────────────────────────────────
+
+/** Douglas-Peucker line simplification. */
+function perpendicularDist(p: Point, a: Point, b: Point): number {
+  const dx = b[1] - a[1];
+  const dy = b[0] - a[0];
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(p[1] - a[1], p[0] - a[0]);
+  const t = Math.max(0, Math.min(1, ((p[1] - a[1]) * dx + (p[0] - a[0]) * dy) / lenSq));
+  return Math.hypot(p[1] - (a[1] + t * dx), p[0] - (a[0] + t * dy));
+}
+
+export function simplifyLine(points: Point[], epsilon: number): Point[] {
+  if (points.length <= 2) return points;
+
+  let maxDist = 0;
+  let maxIdx = 0;
+  const start = points[0];
+  const end = points[points.length - 1];
+
+  for (let i = 1; i < points.length - 1; i++) {
+    const dist = perpendicularDist(points[i], start, end);
+    if (dist > maxDist) {
+      maxDist = dist;
+      maxIdx = i;
+    }
+  }
+
+  if (maxDist > epsilon) {
+    const left = simplifyLine(points.slice(0, maxIdx + 1), epsilon);
+    const right = simplifyLine(points.slice(maxIdx), epsilon);
+    return [...left.slice(0, -1), ...right];
+  }
+  return [start, end];
+}
+
+interface OverpassWay {
+  type: string;
+  id?: number;
+  tags?: Record<string, string>;
+  geometry?: { lat: number; lon: number }[];
+}
+
+function round5(n: number): number {
+  return Math.round(n * 1e5) / 1e5;
+}
+
+/** Simplifies and compacts the raw Overpass payload. */
+export function transformRoads(data: unknown): { roads: CompactRoad[]; truncated: boolean } {
+  const elements = ((data as { elements?: unknown[] } | null)?.elements ?? []) as OverpassWay[];
+  const roads: CompactRoad[] = [];
+  let points = 0;
+  let truncated = false;
+
+  for (const el of elements) {
+    if (roads.length >= MAX_WAYS || points >= MAX_POINTS) {
+      truncated = true;
+      break;
+    }
+    if (el.type !== 'way' || !Array.isArray(el.geometry)) continue;
+
+    const raw: Point[] = [];
+    for (const g of el.geometry) {
+      if (g && Number.isFinite(g.lat) && Number.isFinite(g.lon)) raw.push([g.lat, g.lon]);
+    }
+    if (raw.length < 2) continue;
+
+    const simple = simplifyLine(raw, EPSILON);
+    if (simple.length < 2) continue;
+
+    roads.push({
+      id: typeof el.id === 'number' ? el.id : 0,
+      type: el.tags?.highway ?? 'unknown',
+      geometry: simple.map(([lat, lon]) => [round5(lat), round5(lon)] as Point),
+    });
+    points += simple.length;
+  }
+
+  if (truncated) console.warn(`transformRoads: truncated at ${roads.length} ways / ${points} points`);
+  return { roads, truncated };
+}
+
+interface NominatimResult {
+  name?: string;
+  display_name?: string;
+  lat?: string;
+  lon?: string;
+  boundingbox?: string[];
+  address?: Record<string, string>;
+}
+
+/** Maps a Nominatim result onto the app's own City shape, server-side. */
+export function toCity(r: NominatimResult): City | null {
+  const lat = Number(r.lat);
+  const lon = Number(r.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (!Array.isArray(r.boundingbox) || r.boundingbox.length !== 4) return null;
+
+  const bb = r.boundingbox.map(Number);
+  if (bb.some((n) => !Number.isFinite(n))) return null;
+
+  const displayName = r.display_name ?? '';
+  const name =
+    r.address?.city || r.address?.town || r.address?.village || r.name || displayName.split(',')[0] || '';
+
+  return {
+    name,
+    displayName,
+    lat,
+    lon,
+    // Nominatim orders boundingbox as south, north, west, east.
+    boundingBox: [bb[0], bb[2], bb[1], bb[3]],
+  };
+}
+
+// ── Cache ───────────────────────────────────────────────────────────────────
+
+interface CacheHit<T> {
+  value: T;
+  fresh: boolean;
+}
+
+const memory = new Map<string, { value: string; freshUntil: number; staleUntil: number }>();
+const MEMORY_MAX = 200;
+
+async function cacheGet<T>(key: string): Promise<CacheHit<T> | null> {
+  const redis = redisConfig();
+  if (redis) {
+    try {
+      const auth = { Authorization: `Bearer ${redis.token}` };
+      for (const [suffix, fresh] of [
+        ['', true],
+        [':stale', false],
+      ] as [string, boolean][]) {
+        const res = await fetch(`${redis.url}/get/${encodeURIComponent(key + suffix)}`, {
+          headers: auth,
+          signal: AbortSignal.timeout(REDIS_TIMEOUT_MS),
+        });
+        if (!res.ok) continue;
+        const body = (await res.json()) as { result: string | null };
+        if (body.result) return { value: JSON.parse(body.result) as T, fresh };
+      }
+      return null;
+    } catch (err) {
+      console.warn('cache read failed, continuing without it:', err instanceof Error ? err.message : err);
+      return null;
+    }
+  }
+
+  const hit = memory.get(key);
+  if (!hit || Date.now() > hit.staleUntil) {
+    memory.delete(key);
+    return null;
+  }
+  return { value: JSON.parse(hit.value) as T, fresh: Date.now() < hit.freshUntil };
+}
+
+async function cacheSet(
+  key: string,
+  value: unknown,
+  freshTtlSec: number,
+  staleTtlSec: number,
+): Promise<void> {
+  const payload = JSON.stringify(value);
+  const redis = redisConfig();
+
+  if (redis) {
+    try {
+      const writes = await Promise.all([
+        [key, freshTtlSec],
+        [`${key}:stale`, staleTtlSec],
+      ].map(([k, ttl]) =>
+        fetch(`${redis.url}/set/${encodeURIComponent(k as string)}/ex/${ttl}`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${redis.token}`, 'Content-Type': 'application/json' },
+          body: payload,
+          signal: AbortSignal.timeout(REDIS_TIMEOUT_MS),
+        }),
+      ));
+      for (const w of writes) {
+        if (!w.ok) throw new Error(`[${w.status}]`);
+      }
+      return;
+    } catch (err) {
+      console.warn('cache write failed, continuing without it:', err instanceof Error ? err.message : err);
+      return;
+    }
+  }
+
+  const now = Date.now();
+  if (memory.size >= MEMORY_MAX) {
+    const oldest = memory.keys().next().value;
+    if (oldest !== undefined) memory.delete(oldest);
+  }
+  memory.set(key, { value: payload, freshUntil: now + freshTtlSec * 1000, staleUntil: now + staleTtlSec * 1000 });
+}
+
+// ── Rate limiting ───────────────────────────────────────────────────────────
+
+async function rateLimited(
+  key: string,
+  limit: number,
+): Promise<{ limited: boolean; retryAfter: number }> {
+  const redis = redisConfig();
+  // Fail open. The cache is the real load protection, and a Redis outage must not take the
+  // site's core feature down with it.
+  if (!redis) return { limited: false, retryAfter: 0 };
+
+  try {
+    const window = new Date().toISOString().slice(0, 13);
+    const res = await fetch(`${redis.url}/pipeline`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${redis.token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify([
+        ['INCR', `geo:rl:${key}:${window}`],
+        ['EXPIRE', `geo:rl:${key}:${window}`, 7200],
+      ]),
+      signal: AbortSignal.timeout(REDIS_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`[${res.status}]`);
+
+    const results = (await res.json()) as [number, unknown];
+    if (Number(results[0]) > limit) {
+      return { limited: true, retryAfter: 3600 - (Date.now() % 3_600_000) / 1000 };
+    }
+    return { limited: false, retryAfter: 0 };
+  } catch (err) {
+    console.warn('rate limiter unavailable, failing open:', err instanceof Error ? err.message : err);
+    return { limited: false, retryAfter: 0 };
+  }
+}
+
+// ── Single-flight ───────────────────────────────────────────────────────────
+
+const inflight = new Map<string, Promise<unknown>>();
+
+/** Collapses concurrent identical requests into a single upstream call. */
+function singleFlight<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const existing = inflight.get(key);
+  if (existing) return existing as Promise<T>;
+  const p = fn().finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
+// ── Handlers ────────────────────────────────────────────────────────────────
+
+function buildRoadsQuery(bbox: [number, number, number, number]): string {
+  const [south, west, north, east] = bbox;
+  return `[out:json][timeout:20][maxsize:8388608];(way["highway"~"${HIGHWAY_RE}"](${south},${west},${north},${east}););out geom;`;
+}
+
+function roadsCacheKey(bbox: [number, number, number, number]): string {
+  return `geo:roads:v2:${bbox.map((n) => n.toFixed(4)).join(',')}`;
+}
+
+function safeParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function handleRoads(
+  res: ApiResponse,
+  rawBbox: unknown,
+  ip: string,
+): Promise<void> {
+  if (!isValidBbox(rawBbox)) {
+    res.status(400).json({ error: 'invalid_bbox' });
+    return;
+  }
+  const bbox = rawBbox as [number, number, number, number];
+  const key = roadsCacheKey(bbox);
+
+  const cached = await cacheGet<CompactRoad[]>(key);
+  if (cached?.fresh) {
+    res.status(200).json({ roads: cached.value, cached: true });
+    return;
+  }
+
+  const rl = await rateLimited(ip, REQUESTS_PER_HOUR);
+  if (rl.limited) {
+    // Serve a stale copy rather than breaking the core feature for a returning visitor.
+    if (cached) {
+      res.setHeader('Retry-After', String(Math.ceil(rl.retryAfter)));
+      res.status(200).json({ roads: cached.value, cached: true, stale: true });
+      return;
+    }
+    res.setHeader('Retry-After', String(Math.ceil(rl.retryAfter)));
+    res.status(429).json({ error: 'rate_limited', retry_after: Math.ceil(rl.retryAfter) });
+    return;
+  }
+
+  try {
+    const roads = await singleFlight(key, async () => {
+      const again = await cacheGet<CompactRoad[]>(key);
+      if (again?.fresh) return again.value;
+      const data = await fetchOverpass(buildRoadsQuery(bbox));
+      const { roads: list } = transformRoads(data);
+      await cacheSet(key, list, ROADS_FRESH_TTL, ROADS_STALE_TTL);
+      return list;
+    });
+    res.status(200).json({ roads, cached: false });
+  } catch (err) {
+    console.error('geo roads failed:', err instanceof Error ? err.message : err);
+    res.status(503).json({ error: 'upstream_unavailable' });
+  }
+}
+
+async function handleSearch(
+  res: ApiResponse,
+  rawQuery: unknown,
+  ip: string,
+): Promise<void> {
+  const q = normaliseQuery(rawQuery);
+  if (!q) {
+    res.status(400).json({ error: 'invalid_query' });
+    return;
+  }
+
+  const key = `geo:search:v2:${q.toLowerCase()}`;
+  const cached = await cacheGet<City[]>(key);
+  if (cached?.fresh) {
+    res.status(200).json({ cities: cached.value, cached: true });
+    return;
+  }
+
+  const rl = await rateLimited(ip, REQUESTS_PER_HOUR);
+  if (rl.limited) {
+    if (cached) {
+      res.setHeader('Retry-After', String(Math.ceil(rl.retryAfter)));
+      res.status(200).json({ cities: cached.value, cached: true, stale: true });
+      return;
+    }
+    res.setHeader('Retry-After', String(Math.ceil(rl.retryAfter)));
+    res.status(429).json({ error: 'rate_limited', retry_after: Math.ceil(rl.retryAfter) });
+    return;
+  }
+
+  try {
+    const cities = await singleFlight(key, async () => {
+      const again = await cacheGet<City[]>(key);
+      if (again?.fresh) return again.value;
+      const data = (await fetchNominatim(q)) as NominatimResult[];
+      const list = (Array.isArray(data) ? data : [])
+        .map(toCity)
+        .filter((c): c is City => c !== null && c.name.length > 0);
+      await cacheSet(key, list, SEARCH_FRESH_TTL, SEARCH_STALE_TTL);
+      return list;
+    });
+    res.status(200).json({ cities, cached: false });
+  } catch (err) {
+    console.error('geo search failed:', err instanceof Error ? err.message : err);
+    res.status(503).json({ error: 'upstream_unavailable' });
+  }
+}
+
+export default async function handler(req: ApiRequest, res: ApiResponse): Promise<void> {
+  res.setHeader('Cache-Control', 'no-store');
+
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.status(204).end();
+    return;
+  }
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'method_not_allowed' });
+    return;
+  }
+
+  const body = (typeof req.body === 'string' ? safeParse(req.body) : req.body) as
+    | { kind?: string; bbox?: unknown; q?: unknown }
+    | null;
+
+  if (!body || typeof body !== 'object') {
+    res.status(400).json({ error: 'invalid_json' });
+    return;
+  }
+
+  const ip = clientIp(req.headers);
+
+  if (body.kind === 'roads') {
+    await handleRoads(res, body.bbox, ip);
+    return;
+  }
+  if (body.kind === 'search') {
+    await handleSearch(res, body.q, ip);
+    return;
+  }
+
+  res.status(400).json({ error: 'unknown_kind' });
+}

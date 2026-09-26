@@ -11,10 +11,10 @@ export type BBox = [number, number, number, number];
  * given city is fetched upstream once rather than once per visitor.
  */
 export async function fetchRoads(bbox: BBox): Promise<Road[]> {
-  const res = await fetch('/api/geo-roads', {
+  const res = await fetch('/api/geo', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ bbox }),
+    body: JSON.stringify({ kind: 'roads', bbox }),
   });
 
   if (!res.ok) {

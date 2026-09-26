@@ -1,10 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { simplifyLine, isValidBbox, clientIp, userAgent } from '../../server/geo-upstream';
-import { transformRoads } from '../../api/geo-roads';
-import { normaliseQuery, toCity } from '../../api/geo-search';
-import roadsHandler from '../../api/geo-roads';
-import type { ApiRequest, ApiResponse } from '../../api/geo-roads';
-import type { Point } from '../../server/geo-upstream';
+import geoHandler, {
+  simplifyLine,
+  isValidBbox,
+  clientIp,
+  userAgent,
+  transformRoads,
+  normaliseQuery,
+  toCity,
+} from '../../api/geo';
+import type { ApiRequest, ApiResponse } from '../../api/geo';
+
+type Point = [number, number];
 
 const originalEnv = { ...process.env };
 
@@ -25,7 +31,7 @@ afterEach(() => {
 type Captured = { status: number; headers: Record<string, string>; body: unknown };
 
 async function call(
-  handler: typeof roadsHandler,
+  handler: typeof geoHandler,
   body: unknown,
   opts: { ip?: string; method?: string } = {},
 ) {
@@ -253,7 +259,7 @@ describe('toCity', () => {
   });
 });
 
-describe('geo-roads endpoint', () => {
+describe('geo endpoint', () => {
   function mockFetch(handler: (url: string) => Response) {
     const mock = vi.fn(async (input: RequestInfo | URL) => handler(String(input)));
     vi.stubGlobal('fetch', mock);
@@ -269,7 +275,7 @@ describe('geo-roads endpoint', () => {
 
   it('rejects an invalid bbox before any network call', async () => {
     const mock = mockFetch(() => new Response('{}'));
-    const res = await call(roadsHandler, { bbox: [1, 2, 3] });
+    const res = await call(geoHandler, { kind: 'roads', bbox: [1, 2, 3] });
     expect(res.status).toBe(400);
     expect(res.body).toEqual({ error: 'invalid_bbox' });
     expect(mock).not.toHaveBeenCalled();
@@ -278,8 +284,8 @@ describe('geo-roads endpoint', () => {
   it('rejects a non-POST method', async () => {
     const mock = mockFetch(() => new Response('{}'));
     const res = await call(
-      roadsHandler,
-      { bbox: [38.7, -9.2, 38.75, -9.1] },
+      geoHandler,
+      { kind: 'roads', bbox: [38.7, -9.2, 38.75, -9.1] },
       { method: 'GET' },
     );
     expect(res.status).toBe(405);
@@ -295,7 +301,7 @@ describe('geo-roads endpoint', () => {
         headers: { 'Content-Type': 'application/json' },
       });
     });
-    await call(roadsHandler, { bbox: [38.7, -9.2, 38.75, -9.1] });
+    await call(geoHandler, { kind: 'roads', bbox: [38.7, -9.2, 38.75, -9.1] });
     expect(seen.length).toBeGreaterThan(0);
     expect(seen[0]).toMatch(/^https:\/\//);
   });
@@ -325,7 +331,7 @@ describe('geo-roads endpoint', () => {
 
     // Distinct bbox: the in-process cache is module-level and persists between tests, so
     // reusing a bbox would be served from cache instead of exercising the mirror fallback.
-    const res = await call(roadsHandler, { bbox: [41.1, -8.6, 41.15, -8.55] });
+    const res = await call(geoHandler, { kind: 'roads', bbox: [41.1, -8.6, 41.15, -8.55] });
     expect(res.status).toBe(200);
     expect(tried.length).toBe(2);
     const body = res.body as { roads: unknown[] };
@@ -334,7 +340,7 @@ describe('geo-roads endpoint', () => {
 
   it('returns 503 when every mirror fails', async () => {
     mockFetch(() => new Response('down', { status: 503 }));
-    const res = await call(roadsHandler, { bbox: [45.2, 7.6, 45.25, 7.65] });
+    const res = await call(geoHandler, { kind: 'roads', bbox: [45.2, 7.6, 45.25, 7.65] });
     expect(res.status).toBe(503);
     expect(res.body).toEqual({ error: 'upstream_unavailable' });
   });
@@ -351,11 +357,11 @@ describe('geo-roads endpoint', () => {
 
     const bbox = [51.5, -0.12, 51.52, -0.09];
     await Promise.all([
-      call(roadsHandler, { bbox }),
-      call(roadsHandler, { bbox }),
-      call(roadsHandler, { bbox }),
-      call(roadsHandler, { bbox }),
-      call(roadsHandler, { bbox }),
+      call(geoHandler, { kind: 'roads', bbox }),
+      call(geoHandler, { kind: 'roads', bbox }),
+      call(geoHandler, { kind: 'roads', bbox }),
+      call(geoHandler, { kind: 'roads', bbox }),
+      call(geoHandler, { kind: 'roads', bbox }),
     ]);
     expect(upstreamCalls).toBe(1);
   });
@@ -383,11 +389,11 @@ describe('geo-roads endpoint', () => {
     });
 
     const bbox = [40.1, -8.2, 40.15, -8.15];
-    const first = await call(roadsHandler, { bbox });
+    const first = await call(geoHandler, { kind: 'roads', bbox });
     expect(first.status).toBe(200);
     expect(upstreamCalls).toBe(1);
 
-    const second = await call(roadsHandler, { bbox });
+    const second = await call(geoHandler, { kind: 'roads', bbox });
     expect(second.status).toBe(200);
     expect(upstreamCalls).toBe(1);
     expect((second.body as { cached: boolean }).cached).toBe(true);

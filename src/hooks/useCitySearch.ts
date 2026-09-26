@@ -27,10 +27,10 @@ export function useCitySearch() {
       abortRef.current = controller;
 
       try {
-        const res = await fetch('/api/geo-search', {
+        const res = await fetch('/api/geo', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ q: query.trim() }),
+          body: JSON.stringify({ kind: 'search', q: query.trim() }),
           signal: controller.signal,
         });
 
