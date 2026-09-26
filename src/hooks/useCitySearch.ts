@@ -1,8 +1,11 @@
 import { useState, useCallback, useRef } from 'react';
 import { City } from '@/types/artwork';
 
-const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
-
+/**
+ * City search runs through our own proxy rather than hitting Nominatim from the browser.
+ * Nominatim requires an identifying User-Agent (browsers cannot set one) and asks clients to
+ * keep request volume low, which the proxy's cache and rate limit enforce.
+ */
 export function useCitySearch() {
   const [results, setResults] = useState<City[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -13,7 +16,7 @@ export function useCitySearch() {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (abortRef.current) abortRef.current.abort();
 
-    if (query.length < 2) {
+    if (query.trim().length < 2) {
       setResults([]);
       return;
     }
@@ -24,41 +27,20 @@ export function useCitySearch() {
       abortRef.current = controller;
 
       try {
-        const params = new URLSearchParams({
-          q: query,
-          format: 'json',
-          limit: '5',
-          addressdetails: '1',
-        });
-
-        const response = await fetch(`${NOMINATIM_URL}?${params}`, {
+        const res = await fetch('/api/geo-search', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ q: query.trim() }),
           signal: controller.signal,
-          headers: { 'Accept-Language': 'en' },
         });
 
-        const data = await response.json();
+        if (!res.ok) {
+          setResults([]);
+          return;
+        }
 
-        const cities: City[] = data
-          .filter((r: any) => r.boundingbox)
-          .map((r: any) => ({
-            name:
-              r.address?.city ||
-              r.address?.town ||
-              r.address?.village ||
-              r.name ||
-              r.display_name.split(',')[0],
-            displayName: r.display_name,
-            lat: parseFloat(r.lat),
-            lon: parseFloat(r.lon),
-            boundingBox: [
-              parseFloat(r.boundingbox[0]),
-              parseFloat(r.boundingbox[2]),
-              parseFloat(r.boundingbox[1]),
-              parseFloat(r.boundingbox[3]),
-            ] as [number, number, number, number],
-          }));
-
-        setResults(cities);
+        const data = (await res.json()) as { cities?: City[] };
+        setResults(Array.isArray(data.cities) ? data.cities : []);
       } catch (e) {
         if ((e as Error).name !== 'AbortError') {
           console.error('Search error:', e);
@@ -66,7 +48,7 @@ export function useCitySearch() {
       } finally {
         setIsSearching(false);
       }
-    }, 300);
+    }, 400);
   }, []);
 
   const clearResults = useCallback(() => setResults([]), []);

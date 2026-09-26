@@ -9,7 +9,8 @@ export interface City {
 export interface Road {
   id: number;
   type: string;
-  geometry: { lat: number; lon: number }[];
+  /** Compact [lat, lon] tuples, produced by the geo proxy. */
+  geometry: [number, number][];
 }
 
 export interface ColorPreset {

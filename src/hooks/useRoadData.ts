@@ -11,7 +11,8 @@ export function useRoadData() {
   const loadRoads = useCallback(async (city: City) => {
     setError(null);
 
-    // Check cache first — instant load
+    // Instant re-render on repeat visits. Upstream caching now happens in the proxy; this is
+    // purely a UX nicety so a known city appears without a network round trip.
     const cached = getCachedRoads(city.boundingBox);
     if (cached) {
       setRoads(cached);
@@ -30,7 +31,14 @@ export function useRoadData() {
         setRoads(data);
       }
     } catch (e) {
-      setError('Could not load roads. Please try again or choose a smaller city.');
+      const code = (e as Error & { code?: string }).code;
+      if (code === 'rate_limited') {
+        setError('Too many map searches from this network. Please try again in a few minutes.');
+      } else if (code === 'upstream_unavailable') {
+        setError('Road data is temporarily unavailable. Please try again in a moment.');
+      } else {
+        setError('Could not load roads. Please try again or choose a smaller city.');
+      }
       console.error('Road loading error:', e);
     } finally {
       setIsLoading(false);

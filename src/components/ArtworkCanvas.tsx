@@ -36,7 +36,7 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
         const strokeWidth = getStrokeWidth(r.type);
         const d = r.geometry
           .map((p, i) => {
-            const [x, y] = project(p.lat, p.lon);
+            const [x, y] = project(p[0], p[1]);
             return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
           })
           .join(' ');
