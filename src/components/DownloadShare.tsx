@@ -1,5 +1,15 @@
 import { useState } from 'react';
-import { Download, Loader2, Printer } from 'lucide-react';
+import { Download, Gift, Loader2 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import {
   downloadArtwork,
   downloadArtworkTransparent,
@@ -29,7 +39,8 @@ const FORMAT_OPTIONS: { id: ExportFormat; label: string }[] = [
 const DownloadShare = ({ svgRef, cityName, settings, textColor, onTransparentChange }: DownloadShareProps) => {
   const [format, setFormat] = useState<ExportFormat>('png');
   const [isDownloading, setIsDownloading] = useState(false);
-  const [isBuying, setIsBuying] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const filename = cityName.toLowerCase().replace(/\s+/g, '-');
 
@@ -38,10 +49,18 @@ const DownloadShare = ({ svgRef, cityName, settings, textColor, onTransparentCha
     onTransparentChange(f === 'transparent');
   };
 
-  const handleBuy = async () => {
-    if (!svgRef.current || isBuying) return;
-    setIsBuying(true);
-    // Opened synchronously: a window.open() after an await is usually blocked as a popup.
+  /** First click only asks for confirmation. Deliberately opens no tab yet. */
+  const handleGiftClick = () => {
+    if (!svgRef.current || isPreparing) return;
+    setConfirmOpen(true);
+  };
+
+  const handleConfirmGift = async () => {
+    if (!svgRef.current || isPreparing) return;
+    setConfirmOpen(false);
+    setIsPreparing(true);
+    // Opened synchronously on the confirmation click: a window.open() after an await is usually
+    // blocked as a popup, and the click on "Gift it" is itself the gesture that allows it.
     const tab = window.open('', '_blank');
 
     const closeTab = () => {
@@ -119,7 +138,7 @@ const DownloadShare = ({ svgRef, cityName, settings, textColor, onTransparentCha
       closeTab();
       toast.error('Something went wrong. Please try again.');
     } finally {
-      setIsBuying(false);
+      setIsPreparing(false);
     }
   };
 
@@ -166,12 +185,12 @@ const DownloadShare = ({ svgRef, cityName, settings, textColor, onTransparentCha
         </div>
 
         <button
-          onClick={handleBuy}
-          disabled={isBuying}
+          onClick={handleGiftClick}
+          disabled={isPreparing}
           className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-accent text-accent-foreground rounded-xl text-sm font-medium hover:opacity-90 transition-opacity duration-200 disabled:opacity-50"
         >
-          <Printer className="w-4 h-4" />
-          {isBuying ? 'Preparing your print…' : 'Print your city'}
+          <Gift className="w-4 h-4" />
+          {isPreparing ? 'Preparing…' : 'Gift it'}
         </button>
 
         <button
@@ -188,6 +207,21 @@ const DownloadShare = ({ svgRef, cityName, settings, textColor, onTransparentCha
           {isDownloading ? 'Preparing…' : 'Download'}
         </button>
       </div>
+
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Gift your {cityName} map?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Opens in Printify to choose a size and pay.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmGift}>Gift it</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
