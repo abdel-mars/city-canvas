@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import handler, { clientIp, isPlausibleBase64 } from '../../api/create-printify';
+import type { ApiRequest, ApiResponse } from '../../api/create-printify';
 
-const APP_ORIGIN = 'https://citylines.test';
 const B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
 
 const ENV = {
-  APP_ORIGIN,
+  APP_ORIGIN: 'https://citylines.test',
   PRINTIFY_API_KEY: 'test-key',
   PRINTIFY_SHOP_ID: '26401971',
   PRINTIFY_STORE_DOMAIN: 'citylines-art',
@@ -13,16 +13,43 @@ const ENV = {
   UPSTASH_REDIS_REST_TOKEN: 'test-token',
 };
 
-function post(body: unknown, headers: Record<string, string> = {}, ip = '203.0.113.9') {
-  return new Request('https://citylines.test/api/create-printify', {
-    method: 'POST',
+type Captured = { status: number; headers: Record<string, string>; body: unknown };
+
+/** Invokes the Node-runtime handler and captures what it wrote to the response. */
+async function call(
+  body: unknown,
+  opts: { headers?: Record<string, string>; ip?: string; method?: string } = {},
+): Promise<Captured> {
+  const captured: Captured = { status: 200, headers: {}, body: undefined };
+
+  const req: ApiRequest = {
+    method: opts.method ?? 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      'x-forwarded-for': ip,
-      ...headers,
+      'content-type': 'application/json',
+      'x-forwarded-for': opts.ip ?? '203.0.113.9',
+      ...(opts.headers ?? {}),
     },
     body: typeof body === 'string' ? body : JSON.stringify(body),
-  });
+  };
+
+  const res = {
+    status(code: number) {
+      captured.status = code;
+      return res;
+    },
+    setHeader(name: string, value: string) {
+      captured.headers[name.toLowerCase()] = value;
+    },
+    json(payload: unknown) {
+      captured.body = payload;
+    },
+    end() {
+      /* no-op */
+    },
+  } as unknown as ApiResponse;
+
+  await handler(req, res);
+  return captured;
 }
 
 const validBody = { image_base64: B64, city_name: 'Lisbon', design_hash: 'a1b2c3d4e5' };
@@ -34,7 +61,6 @@ function mockUpstream(opts: { ipCount?: number; globalCount?: number } = {}) {
     const url = String(typeof input === 'object' && 'url' in input ? input.url : input);
     if (url.includes('mock-redis.test')) {
       calls.redis++;
-      // /pipeline replies [count, 'OK', count, 'OK', ...]
       const count = opts.ipCount ?? 1;
       const global = opts.globalCount ?? 1;
       return new Response(JSON.stringify([count, 'OK', global, 'OK']), {
@@ -70,34 +96,29 @@ afterEach(() => {
 });
 
 describe('clientIp', () => {
-  const mk = (headers: Record<string, string>) =>
-    new Request('https://x.test/', { headers });
-
   it('uses the RIGHTMOST x-forwarded-for entry, not a spoofed leftmost one', () => {
-    const req = mk({ 'x-forwarded-for': '1.1.1.1, 2.2.2.2, 198.51.100.7' });
-    expect(clientIp(req)).toBe('198.51.100.7');
+    expect(clientIp({ 'x-forwarded-for': '1.1.1.1, 2.2.2.2, 198.51.100.7' })).toBe('198.51.100.7');
   });
 
   it('cannot be bypassed by prepending fake addresses', () => {
-    const req = mk({ 'x-forwarded-for': '9.9.9.9, 8.8.8.8, 203.0.113.42' });
-    expect(clientIp(req)).not.toBe('9.9.9.9');
-    expect(clientIp(req)).not.toBe('8.8.8.8');
-    expect(clientIp(req)).toBe('203.0.113.42');
+    const ip = clientIp({ 'x-forwarded-for': '9.9.9.9, 8.8.8.8, 203.0.113.42' });
+    expect(ip).not.toBe('9.9.9.9');
+    expect(ip).not.toBe('8.8.8.8');
+    expect(ip).toBe('203.0.113.42');
   });
 
   it('prefers x-vercel-forwarded-for when present', () => {
-    const req = mk({ 'x-vercel-forwarded-for': '198.51.100.7', 'x-forwarded-for': '1.1.1.1' });
-    expect(clientIp(req)).toBe('198.51.100.7');
+    const headers = { 'x-vercel-forwarded-for': '198.51.100.7', 'x-forwarded-for': '1.1.1.1' };
+    expect(clientIp(headers)).toBe('198.51.100.7');
   });
 
   it('falls back to a single shared bucket when no usable address exists', () => {
-    expect(clientIp(mk({}))).toBe('unknown');
-    expect(clientIp(mk({ 'x-forwarded-for': 'not-an-ip-at-all' }))).toBe('unknown');
+    expect(clientIp({})).toBe('unknown');
+    expect(clientIp({ 'x-forwarded-for': 'not-an-ip-at-all' })).toBe('unknown');
   });
 
   it('ignores an untrustworthy rightmost value rather than using it as a key', () => {
-    const req = mk({ 'x-forwarded-for': '198.51.100.7, garbage!!' });
-    expect(clientIp(req)).toBe('unknown');
+    expect(clientIp({ 'x-forwarded-for': '198.51.100.7, garbage!!' })).toBe('unknown');
   });
 });
 
@@ -119,14 +140,36 @@ describe('isPlausibleBase64', () => {
   });
 
   it('rejects payloads beyond the cap', () => {
-    expect(isPlausibleBase64('A'.repeat(4_500_004))).toBe(false);
+    expect(isPlausibleBase64('A'.repeat(4_000_004))).toBe(false);
+  });
+});
+
+describe('endpoint: method and CORS', () => {
+  it('rejects a non-POST method', async () => {
+    mockUpstream();
+    const res = await call(validBody, { method: 'GET' });
+    expect(res.status).toBe(405);
+  });
+
+  it('answers OPTIONS with 204 and the CORS headers', async () => {
+    mockUpstream();
+    const res = await call('', { method: 'OPTIONS' });
+    expect(res.status).toBe(204);
+    expect(res.headers['access-control-allow-origin']).toBe(ENV.APP_ORIGIN);
+  });
+
+  it('locks the CORS origin to APP_ORIGIN rather than a wildcard', async () => {
+    mockUpstream();
+    const res = await call(validBody);
+    expect(res.headers['access-control-allow-origin']).toBe(ENV.APP_ORIGIN);
+    expect(res.headers['access-control-allow-origin']).not.toBe('*');
   });
 });
 
 describe('endpoint: validation (no upstream calls)', () => {
   it('rejects a missing design_hash', async () => {
     const { calls } = mockUpstream();
-    const res = await handler(post({ image_base64: B64, city_name: 'Lisbon' }));
+    const res = await call({ image_base64: B64, city_name: 'Lisbon' });
     expect(res.status).toBe(400);
     expect(calls.printify).toBe(0);
   });
@@ -140,39 +183,29 @@ describe('endpoint: validation (no upstream calls)', () => {
     ['empty', ''],
   ])('rejects %s in city_name', async (_label, city_name) => {
     const { calls } = mockUpstream();
-    const res = await handler(post({ ...validBody, city_name }));
+    const res = await call({ ...validBody, city_name });
     expect(res.status).toBe(400);
     expect(calls.printify).toBe(0);
   });
 
   it('rejects an image that is not valid base64', async () => {
     const { calls } = mockUpstream();
-    const res = await handler(post({ ...validBody, image_base64: 'not base64!!' }));
+    const res = await call({ ...validBody, image_base64: 'not base64!!' });
     expect(res.status).toBe(400);
     expect(calls.printify).toBe(0);
   });
 
   it('rejects malformed JSON', async () => {
     mockUpstream();
-    const res = await handler(post('{not json'));
+    const res = await call('{not json');
     expect(res.status).toBe(400);
-  });
-
-  it('rejects a non-POST method', async () => {
-    mockUpstream();
-    const res = await handler(
-      new Request('https://citylines.test/api/create-printify', { method: 'GET' }),
-    );
-    expect(res.status).toBe(405);
   });
 });
 
 describe('endpoint: request body cap', () => {
-  it('rejects an oversized body with 413 and never calls Printify', async () => {
+  it('rejects an oversized declared Content-Length before touching anything', async () => {
     const { calls } = mockUpstream();
-    const res = await handler(
-      post({ ...validBody, image_base64: 'A'.repeat(6_000_001) }),
-    );
+    const res = await call(validBody, { headers: { 'content-length': '9000000' } });
     expect(res.status).toBe(413);
     expect(calls.printify).toBe(0);
     expect(calls.redis).toBe(0);
@@ -182,7 +215,7 @@ describe('endpoint: request body cap', () => {
 describe('endpoint: rate limiting happens before any Printify call', () => {
   it('returns 429 and makes zero Printify requests when the per-IP tier is exceeded', async () => {
     const { calls } = mockUpstream({ ipCount: 31, globalCount: 1 });
-    const res = await handler(post(validBody));
+    const res = await call(validBody);
     expect(res.status).toBe(429);
     expect(calls.printify).toBe(0);
     expect(calls.redis).toBeGreaterThan(0);
@@ -190,22 +223,22 @@ describe('endpoint: rate limiting happens before any Printify call', () => {
 
   it('returns 429 when the global tier is exceeded even for a fresh IP', async () => {
     const { calls } = mockUpstream({ ipCount: 1, globalCount: 301 });
-    const res = await handler(post(validBody, {}, '198.51.100.99'));
+    const res = await call(validBody, { ip: '198.51.100.99' });
     expect(res.status).toBe(429);
     expect(calls.printify).toBe(0);
   });
 
   it('sets Retry-After when limiting', async () => {
     mockUpstream({ ipCount: 31, globalCount: 1 });
-    const res = await handler(post(validBody));
-    expect(res.headers.get('Retry-After')).toMatch(/^\d+$/);
+    const res = await call(validBody);
+    expect(res.headers['retry-after']).toMatch(/^\d+$/);
   });
 
   it('fails closed when the rate limit store is not configured', async () => {
     delete process.env.UPSTASH_REDIS_REST_URL;
     delete process.env.UPSTASH_REDIS_REST_TOKEN;
     const { calls } = mockUpstream();
-    const res = await handler(post(validBody));
+    const res = await call(validBody);
     expect(res.status).toBe(503);
     expect(calls.printify).toBe(0);
   });
@@ -239,9 +272,9 @@ describe('endpoint: dedupe', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await handler(post(validBody));
+    const res = await call(validBody);
     expect(res.status).toBe(200);
-    const data = (await res.json()) as { product_url: string; reused: boolean };
+    const data = res.body as { product_url: string; reused: boolean };
     // Must be the numeric storefront URL, never the ObjectId.
     expect(data.product_url).toBe('https://citylines-art.printify.me/product/29074930');
     expect(data.product_url).not.toContain('6a21115ff75ca55a1a00c27f');
@@ -262,7 +295,6 @@ describe('endpoint: dedupe', () => {
               {
                 id: '6a21115ff75ca55a1a00c27f',
                 blueprint_id: 282,
-                // Distinct tag from the test above so the in-module memo cannot leak between them.
                 tags: ['cl-ffff000011'],
                 external: { id: '1', handle: 'https://evil.example.com/product/1' },
               },
@@ -281,7 +313,7 @@ describe('endpoint: dedupe', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const res = await handler(post({ ...validBody, design_hash: 'ffff000011' }));
+    const res = await call({ ...validBody, design_hash: 'ffff000011' });
     // Falls through to "pending" rather than handing over a foreign URL.
     expect(res.status).toBe(202);
   });
@@ -289,10 +321,7 @@ describe('endpoint: dedupe', () => {
 
 describe('endpoint: miss results are never cached', () => {
   /** Full happy-path upstream. `page=` marks the product *list*; bare products.json is the create call. */
-  const makeUpstream = (opts: {
-    listCalls: () => number;
-    uploadFails?: () => boolean;
-  }) =>
+  const makeUpstream = (opts: { listCalls: () => number; uploadFails?: () => boolean }) =>
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       const productId = '6a21115ff75ca55a1a00c27f';
@@ -340,13 +369,13 @@ describe('endpoint: miss results are never cached', () => {
     );
 
     // First attempt fails before anything is created, so no positive cache entry exists.
-    const first = await handler(post({ ...validBody, design_hash: 'aaaabbbb11' }));
+    const first = await call({ ...validBody, design_hash: 'aaaabbbb11' });
     expect(first.status).toBe(500);
     expect(listCalls).toBe(1);
 
     // The miss must NOT have been cached: the retry has to consult the shop again.
     uploadFails = false;
-    const second = await handler(post({ ...validBody, design_hash: 'aaaabbbb11' }));
+    const second = await call({ ...validBody, design_hash: 'aaaabbbb11' });
     expect(second.status).toBe(200);
     expect(listCalls).toBe(2);
   });
@@ -355,14 +384,14 @@ describe('endpoint: miss results are never cached', () => {
     let listCalls = 0;
     vi.stubGlobal('fetch', makeUpstream({ listCalls: () => listCalls++ }));
 
-    const first = await handler(post({ ...validBody, design_hash: 'ccccdddd22' }));
+    const first = await call({ ...validBody, design_hash: 'ccccdddd22' });
     expect(first.status).toBe(200);
     expect(listCalls).toBe(1);
 
     // The successful create warms the cache, so this costs no Printify call at all.
-    const second = await handler(post({ ...validBody, design_hash: 'ccccdddd22' }));
+    const second = await call({ ...validBody, design_hash: 'ccccdddd22' });
     expect(second.status).toBe(200);
-    const data = (await second.json()) as { reused?: boolean };
+    const data = second.body as { reused?: boolean };
     expect(data.reused).toBe(true);
     expect(listCalls).toBe(1);
   });

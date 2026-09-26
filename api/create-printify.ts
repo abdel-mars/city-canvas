@@ -1,5 +1,3 @@
-export const runtime = 'edge';
-
 const PRINTIFY_BASE = 'https://api.printify.com/v1';
 const USER_AGENT = 'city-lines-app';
 
@@ -24,9 +22,10 @@ const PRICE_MULTIPLIER = 2.2;
 const POLL_INTERVAL_MS = 1500;
 const POLL_ATTEMPTS = 10;
 
-// Real payloads measure ~0.41 MB of base64, so this is roughly 15x headroom.
-const MAX_BODY_BYTES = 6_000_000;
-const MAX_BASE64_CHARS = 4_500_000;
+// Real payloads measure ~0.41 MB of base64. Vercel rejects bodies over 4.5 MB at the platform
+// level, so this sits below that to keep the check ours and the limit honest.
+const MAX_BODY_BYTES = 4_000_000;
+const MAX_BASE64_CHARS = 4_000_000;
 
 /**
  * Tiered limits. Tier 1 caps how much Printify traffic we can generate at all; tier 4 caps how
@@ -48,6 +47,23 @@ const HASH_RE = /^[a-f0-9]{8,16}$/;
 
 const MEMO_TTL_MS = 30_000;
 const MEMO_MAX = 50;
+
+const HOUR = 3600;
+const DAY = 86400;
+
+/** Minimal structural types for Vercel's Node runtime, avoiding an extra dependency. */
+export interface ApiRequest {
+  method?: string;
+  headers: Record<string, string | string[] | undefined>;
+  body?: unknown;
+}
+
+export interface ApiResponse {
+  status(code: number): ApiResponse;
+  setHeader(name: string, value: string): void;
+  json(body: unknown): void;
+  end(): void;
+}
 
 type Variant = { id: number; title: string };
 type ProductVariant = { id: number; cost?: number };
@@ -92,6 +108,12 @@ export function priceFor(cost: number): number {
   return Math.max(MIN_PRICE_CENTS, Math.round(cost * PRICE_MULTIPLIER));
 }
 
+function header(headers: ApiRequest['headers'], name: string): string | null {
+  const v = headers[name] ?? headers[name.toLowerCase()];
+  if (Array.isArray(v)) return v[0] ?? null;
+  return v ?? null;
+}
+
 /**
  * Resolve the caller's address for rate limiting.
  *
@@ -99,19 +121,19 @@ export function priceFor(cost: number): number {
  * entry is trustworthy — everything to its left is client-supplied. Using the leftmost entry
  * would let anyone mint a fresh rate-limit bucket with a single header.
  */
-export function clientIp(req: Request): string {
-  const rightmost = (header: string | null): string | null => {
-    if (!header) return null;
-    const parts = header.split(',').map((s) => s.trim()).filter(Boolean);
+export function clientIp(headers: ApiRequest['headers']): string {
+  const rightmost = (raw: string | null): string | null => {
+    if (!raw) return null;
+    const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
     if (parts.length === 0) return null;
     const value = parts[parts.length - 1];
     return IP_RE.test(value) ? value : null;
   };
 
   return (
-    rightmost(req.headers.get('x-vercel-forwarded-for')) ??
-    rightmost(req.headers.get('x-forwarded-for')) ??
-    rightmost(req.headers.get('x-real-ip')) ??
+    rightmost(header(headers, 'x-vercel-forwarded-for')) ??
+    rightmost(header(headers, 'x-forwarded-for')) ??
+    rightmost(header(headers, 'x-real-ip')) ??
     'unknown'
   );
 }
@@ -119,7 +141,7 @@ export function clientIp(req: Request): string {
 export function isPlausibleBase64(value: string): boolean {
   if (!value) return false;
   if (value.length > MAX_BASE64_CHARS || value.length % 4 !== 0) return false;
-  // Sampled rather than matched whole, to keep the check cheap on ~4 MB strings.
+  // Sampled rather than matched whole, to keep the check cheap on multi-MB strings.
   return B64_RE.test(value.slice(0, 256)) && B64_RE.test(value.slice(-256));
 }
 
@@ -134,27 +156,38 @@ function handleForStore(env: Env, product: PrintifyProduct | null): string | nul
   return handle;
 }
 
-function corsHeaders(origin: string | null): Record<string, string> {
-  if (!origin) return {};
-  return {
-    'Access-Control-Allow-Origin': origin,
+function corsHeaders(env: Env, req: ApiRequest): Record<string, string> {
+  const headers: Record<string, string> = {
+    Vary: 'Origin',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
-    Vary: 'Origin',
   };
+  if (env.APP_ORIGIN) {
+    // Same-origin browser calls ignore CORS entirely; this only matters for cross-origin use.
+    headers['Access-Control-Allow-Origin'] = env.APP_ORIGIN;
+  }
+  void req;
+  return headers;
 }
 
-function json(body: unknown, status: number, origin: string | null, extra?: Record<string, string>) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders(origin), 'Content-Type': 'application/json', ...(extra ?? {}) },
-  });
+function send(
+  env: Env,
+  req: ApiRequest,
+  res: ApiResponse,
+  body: unknown,
+  status: number,
+  extra?: Record<string, string>,
+): void {
+  for (const [k, v] of Object.entries({ ...corsHeaders(env, req), ...(extra ?? {}) })) {
+    res.setHeader(k, v);
+  }
+  res.status(status).json(body);
 }
 
-function tooMany(retryAfter: number, origin: string | null) {
+function tooMany(env: Env, req: ApiRequest, res: ApiResponse, retryAfter: number) {
   const seconds = Math.max(1, Math.ceil(retryAfter));
-  return json({ error: 'rate_limited', retry_after: seconds }, 429, origin, {
+  send(env, req, res, { error: 'rate_limited', retry_after: seconds }, 429, {
     'Retry-After': String(seconds),
   });
 }
@@ -199,9 +232,6 @@ async function bumpMany(
   for (let i = 0; i < results.length; i += 2) counts.push(Number(results[i]));
   return counts;
 }
-
-const HOUR = 3600;
-const DAY = 86400;
 
 function hourKey(prefix: string, ip: string): string {
   return `${prefix}:rl:h:${ip}:${new Date().toISOString().slice(0, 13)}`;
@@ -412,7 +442,7 @@ async function createAndPublish(
   return { productId: created.id, handle: null };
 }
 
-export default async function handler(req: Request): Promise<Response> {
+export default async function handler(req: ApiRequest, res: ApiResponse): Promise<void> {
   const env: Env = {
     PRINTIFY_API_KEY: process.env.PRINTIFY_API_KEY ?? '',
     PRINTIFY_SHOP_ID: process.env.PRINTIFY_SHOP_ID ?? '',
@@ -424,66 +454,76 @@ export default async function handler(req: Request): Promise<Response> {
     INCLUDE_LARGE: process.env.INCLUDE_LARGE,
   };
 
-  const origin = env.APP_ORIGIN || null;
-
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    for (const [k, v] of Object.entries(corsHeaders(env, req))) res.setHeader(k, v);
+    res.status(204).end();
+    return;
   }
   if (req.method !== 'POST') {
-    return json({ error: 'method_not_allowed' }, 405, origin, { Allow: 'POST, OPTIONS' });
+    send(env, req, res, { error: 'method_not_allowed' }, 405, { Allow: 'POST, OPTIONS' });
+    return;
   }
-  if (!origin || !env.PRINTIFY_API_KEY || !env.PRINTIFY_SHOP_ID) {
-    return json({ error: 'printing_unavailable' }, 500, origin);
+  if (!env.PRINTIFY_API_KEY || !env.PRINTIFY_SHOP_ID) {
+    send(env, req, res, { error: 'printing_unavailable' }, 500);
+    return;
   }
 
   // ── Tier 0: validate. No Redis, no Printify. ──────────────────────────
-  const declaredLength = Number(req.headers.get('content-length') ?? 0);
-  if (Number.isFinite(declaredLength) && declaredLength > MAX_BODY_BYTES) {
-    return json({ error: 'payload_too_large' }, 413, origin);
-  }
-
-  let raw: string;
-  try {
-    raw = await req.text();
-  } catch {
-    return json({ error: 'unreadable_body' }, 400, origin);
-  }
-  if (raw.length > MAX_BODY_BYTES) {
-    return json({ error: 'payload_too_large' }, 413, origin);
+  const declared = Number(header(req.headers, 'content-length') ?? 0);
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    send(env, req, res, { error: 'payload_too_large' }, 413);
+    return;
   }
 
   let body: { image_base64?: string; city_name?: string; design_hash?: string };
-  try {
-    body = JSON.parse(raw) as typeof body;
-  } catch {
-    return json({ error: 'invalid_json' }, 400, origin);
+  if (typeof req.body === 'string') {
+    if (req.body.length > MAX_BODY_BYTES) {
+      send(env, req, res, { error: 'payload_too_large' }, 413);
+      return;
+    }
+    try {
+      body = JSON.parse(req.body) as typeof body;
+    } catch {
+      send(env, req, res, { error: 'invalid_json' }, 400);
+      return;
+    }
+  } else if (req.body && typeof req.body === 'object') {
+    body = req.body as typeof body;
+  } else {
+    send(env, req, res, { error: 'invalid_json' }, 400);
+    return;
   }
 
   if (!body.design_hash || !HASH_RE.test(body.design_hash)) {
-    return json({ error: 'design_hash is required (8-16 hex chars)' }, 400, origin);
+    send(env, req, res, { error: 'design_hash is required (8-16 hex chars)' }, 400);
+    return;
   }
-  // The city name is the only user-supplied text that reaches Printify, and it is
-  // pattern-checked then interpolated into a server-built title/description.
+  // The city name is the only user-supplied text that reaches Printify. It is pattern-checked,
+  // then interpolated into a server-built title/description.
   const city = (body.city_name ?? '').trim();
   if (!CITY_RE.test(city)) {
-    return json({ error: 'city_name is required (letters, numbers and spaces, max 60)' }, 400, origin);
+    send(env, req, res, { error: 'city_name is required (letters, numbers and spaces, max 60)' }, 400);
+    return;
   }
   if (!body.image_base64 || !isPlausibleBase64(body.image_base64)) {
-    return json({ error: 'image_base64 is required and must be valid base64' }, 400, origin);
+    send(env, req, res, { error: 'image_base64 is required and must be valid base64' }, 400);
+    return;
   }
 
   // ── Tier 1: coarse limits. Must precede every Printify call. ─────────
   if (!storeConfigured(env)) {
     console.error('rate limit store not configured; refusing to touch Printify');
-    return json({ error: 'printing_unavailable' }, 503, origin);
+    send(env, req, res, { error: 'printing_unavailable' }, 503);
+    return;
   }
-  const ip = clientIp(req);
+  const ip = clientIp(req.headers);
   try {
     const rl = await limitRequests(env, ip);
-    if (rl.limited) return tooMany(rl.retryAfter, origin);
+    if (rl.limited) return tooMany(env, req, res, rl.retryAfter);
   } catch (err) {
     console.error('rate limiting unavailable:', err instanceof Error ? err.message : err);
-    return json({ error: 'printing_unavailable' }, 503, origin);
+    send(env, req, res, { error: 'printing_unavailable' }, 503);
+    return;
   }
 
   const tag = `cl-${body.design_hash}`;
@@ -499,7 +539,8 @@ export default async function handler(req: Request): Promise<Response> {
   if (scan.match) {
     const known = handleForStore(env, scan.match);
     if (known) {
-      return json({ product_url: known, product_id: scan.match.external?.id, reused: true }, 200, origin);
+      send(env, req, res, { product_url: known, product_id: scan.match.external?.id, reused: true }, 200);
+      return;
     }
     // An earlier attempt created the product but the storefront never returned a URL.
     const refreshed = await printifyFetch<PrintifyProduct>(
@@ -508,18 +549,21 @@ export default async function handler(req: Request): Promise<Response> {
     ).catch(() => null);
     const handle = handleForStore(env, refreshed);
     if (handle) {
-      return json({ product_url: handle, product_id: refreshed?.external?.id, reused: true }, 200, origin);
+      send(env, req, res, { product_url: handle, product_id: refreshed?.external?.id, reused: true }, 200);
+      return;
     }
-    return json({ pending: true }, 202, origin, { 'Retry-After': '3' });
+    send(env, req, res, { pending: true }, 202, { 'Retry-After': '3' });
+    return;
   }
 
   // ── Tier 4: creations only.
   try {
     const rl = await limitCreations(env, ip);
-    if (rl.limited) return tooMany(rl.retryAfter, origin);
+    if (rl.limited) return tooMany(env, req, res, rl.retryAfter);
   } catch (err) {
     console.error('rate limiting unavailable:', err instanceof Error ? err.message : err);
-    return json({ error: 'printing_unavailable' }, 503, origin);
+    send(env, req, res, { error: 'printing_unavailable' }, 503);
+    return;
   }
 
   // ── Tier 5: create, publish, resolve the storefront URL. ─────────────
@@ -536,16 +580,17 @@ export default async function handler(req: Request): Promise<Response> {
 
     if (!handle) {
       // Retrying is safe: the tag makes the retry idempotent, so it will only re-poll.
-      return json({ pending: true }, 202, origin, { 'Retry-After': '3' });
+      send(env, req, res, { pending: true }, 202, { 'Retry-After': '3' });
+      return;
     }
     // Warm the positive cache so an immediate repeat click costs no Printify call.
     rememberScan(tag, {
       match: { id: productId, external: { handle } },
       costByVariantId: scan.costByVariantId,
     });
-    return json({ product_url: handle, product_id: handle.split('/').pop() }, 200, origin);
+    send(env, req, res, { product_url: handle, product_id: handle.split('/').pop() }, 200);
   } catch (err) {
     console.error('create-printify failed:', err instanceof Error ? err.message : err);
-    return json({ error: 'Could not prepare your print. Please try again.' }, 500, origin);
+    send(env, req, res, { error: 'Could not prepare your print. Please try again.' }, 500);
   }
 }

@@ -16,6 +16,11 @@ dist-ssr
 .env
 .env.*
 !.env.example
+# Local scratch files that hold real credentials. Keep these OUTSIDE the repo.
+redis.txt
+token-printify.txt
+secrets*.txt
+*-secret*.txt
 
 # Editor directories and files
 .vscode/*
@@ -27,3 +32,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+.vercel
+.env*
