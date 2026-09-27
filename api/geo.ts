@@ -610,7 +610,11 @@ async function handleSearch(
     return;
   }
 
-  const key = `geo:search:v2:${q.toLowerCase()}`;
+  // v3: the v2 entries were written by an older deploy whose clamp was 0.25, and warm instances
+  // running that deploy keep re-populating the shared cache with those stale bboxes. Deleting the
+  // keys cannot win that race; a new prefix means old and new code write to different keys and
+  // cannot interfere. The orphaned v2 entries expire on their own.
+  const key = `geo:search:v3:${q.toLowerCase()}`;
   const cached = await cacheGet<City[]>(key, SEARCH_FRESH_TTL);
   if (cached?.fresh) {
     res.status(200).json({ cities: cached.value, cached: true });
