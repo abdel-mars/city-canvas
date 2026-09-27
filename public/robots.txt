@@ -1,14 +1,25 @@
+# Gift pages are shareable but deliberately not indexed: every distinct design
+# produces a new /gift URL, which would otherwise build up a large population of
+# near-identical pages. The authoritative directive is the runtime <meta name="robots">
+# set by src/hooks/useNoindex.ts; this Disallow is a second layer that stops crawling.
+# Longest-match wins, so /gift is disallowed while the rest of the site stays open.
+
 User-agent: Googlebot
 Allow: /
+Disallow: /gift
 
 User-agent: Bingbot
 Allow: /
+Disallow: /gift
 
 User-agent: Twitterbot
 Allow: /
+Disallow: /gift
 
 User-agent: facebookexternalhit
 Allow: /
+Disallow: /gift
 
 User-agent: *
 Allow: /
+Disallow: /gift

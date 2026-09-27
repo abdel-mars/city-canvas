@@ -2,13 +2,13 @@ const PRINTIFY_BASE = 'https://api.printify.com/v1';
 const USER_AGENT = 'city-lines-app';
 
 // Blueprint 282 = "Matte Vertical Posters". The artwork is 1:1, so only square sizes are offered.
-const POSTER_BLUEPRINT_ID = 282;
-const PREFERRED_SQUARE_INCHES = [16, 20, 24];
+export const POSTER_BLUEPRINT_ID = 282;
+export const PREFERRED_SQUARE_INCHES = [16, 20, 24];
 const LARGE_SQUARE_INCHES = [28];
 
 // Fallback costs (cents) for blueprint 282, used only when the shop has no product to learn from.
 // Verified against the live catalog; refresh whenever the catalogue is re-checked.
-const FALLBACK_COST_CENTS: Record<number, number> = {
+export const FALLBACK_COST_CENTS: Record<number, number> = {
   10: 786, 12: 895, 14: 1396, 16: 1187, 18: 1187, 20: 1314, 23: 1481, 24: 1481, 28: 3060,
 };
 // Used when a size is unknown entirely. Deliberately high so we never sell below cost.
@@ -82,7 +82,7 @@ type PrintifyProduct = {
 type ScanResult = { match: PrintifyProduct | null; costByVariantId: Map<number, number> };
 type ResolvedVariant = { id: number; title: string; cost: number };
 
-interface Env {
+export interface Env {
   PRINTIFY_API_KEY: string;
   PRINTIFY_SHOP_ID: string;
   PRINTIFY_STORE_DOMAIN: string;
@@ -192,7 +192,7 @@ function tooMany(env: Env, req: ApiRequest, res: ApiResponse, retryAfter: number
   });
 }
 
-async function printifyFetch<T>(env: Env, path: string, init?: RequestInit): Promise<T> {
+export async function printifyFetch<T>(env: Env, path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${PRINTIFY_BASE}${path}`, {
     ...init,
     headers: {
@@ -210,24 +210,56 @@ async function printifyFetch<T>(env: Env, path: string, init?: RequestInit): Pro
 }
 
 /** Missing store config must fail closed rather than leave the paid account unprotected. */
-function storeConfigured(env: Env): boolean {
+export function storeConfigured(env: Env): boolean {
   return Boolean(env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN);
 }
 
+/**
+ * One Redis round trip over HTTP, returning the unwrapped values.
+ *
+ * Two Upstash traps, both learned the hard way in api/geo.ts and pinned here with tests:
+ *  - a failed command still returns HTTP 200, with the error inside the body; and
+ *  - every value arrives wrapped as `{ result }`, never bare.
+ *
+ * So `Number(results[i])` on a raw element yields NaN, and a `count > limit` check against NaN is
+ * always false — which silently disables the limiter rather than failing loudly.
+ */
+export async function redisPipeline(
+  url: string,
+  token: string,
+  commands: (string | number)[][],
+): Promise<unknown[]> {
+  const res = await fetch(`${url}/pipeline`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(commands),
+  });
+  if (!res.ok) throw new Error(`rate limit store -> [${res.status}]`);
+
+  const parsed = (await res.json()) as unknown;
+  if (!Array.isArray(parsed)) throw new Error('rate limit store -> malformed response');
+
+  return parsed.map((entry, i) => {
+    if (entry === null || typeof entry !== 'object') return entry;
+    const record = entry as { result?: unknown; error?: unknown };
+    if (record.error !== undefined && record.error !== null) {
+      throw new Error(`rate limit store -> command ${i} failed: ${String(record.error)}`);
+    }
+    return 'result' in record ? record.result : entry;
+  });
+}
+
 /** INCR + EXPIRE for several keys in one round trip. Returns the new counts. */
-async function bumpMany(
+export async function bumpMany(
   url: string,
   token: string,
   entries: { key: string; ttl: number }[],
 ): Promise<number[]> {
-  const pipeline = entries.flatMap((e) => [['INCR', e.key], ['EXPIRE', e.key, e.ttl]]);
-  const res = await fetch(`${url}/pipeline`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(pipeline),
-  });
-  if (!res.ok) throw new Error(`rate limit store -> [${res.status}]`);
-  const results = (await res.json()) as unknown[];
+  const results = await redisPipeline(
+    url,
+    token,
+    entries.flatMap((e) => [['INCR', e.key], ['EXPIRE', e.key, e.ttl]]),
+  );
   const counts: number[] = [];
   for (let i = 0; i < results.length; i += 2) counts.push(Number(results[i]));
   return counts;
@@ -330,8 +362,63 @@ async function scanShop(env: Env, tag: string): Promise<ScanResult> {
   return result;
 }
 
+export function readEnv(): Env {
+  return {
+    PRINTIFY_API_KEY: process.env.PRINTIFY_API_KEY ?? '',
+    PRINTIFY_SHOP_ID: process.env.PRINTIFY_SHOP_ID ?? '',
+    PRINTIFY_STORE_DOMAIN: process.env.PRINTIFY_STORE_DOMAIN ?? 'citylines-art',
+    APP_ORIGIN: process.env.APP_ORIGIN ?? '',
+    UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
+    UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
+    PRINT_PROVIDER_ID: process.env.PRINT_PROVIDER_ID,
+    INCLUDE_LARGE: process.env.INCLUDE_LARGE,
+  };
+}
+
+/**
+ * The shop's display currency.
+ *
+ * The public API exposes no shop-currency field, and nothing in the storefront pins one, so it is
+ * an explicit setting. The live Pop-Up Store renders `$`, hence the default. Override with
+ * `PRINTIFY_CURRENCY` rather than editing the default, and note that a wrong value would show a
+ * price the checkout disagrees with.
+ */
+export function shopCurrency(): string {
+  const raw = (process.env.PRINTIFY_CURRENCY ?? 'USD').trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(raw) ? raw : 'USD';
+}
+
+/**
+ * Real per-variant costs for every square poster in the shop. Read-only — creates nothing.
+ *
+ * Deliberately not folded into `scanShop`: that memo is keyed on a design tag and doubles as the
+ * dedupe cache, which is meaningless to the public pricing endpoint. Both walk the same pages in
+ * the same order, which is what makes the displayed price and the created price agree.
+ */
+export async function harvestSquareCosts(env: Env): Promise<Map<number, number>> {
+  const costByVariantId = new Map<number, number>();
+  let page = 1;
+
+  for (let i = 0; i < 5; i++) {
+    const body = await printifyFetch<{ data?: PrintifyProduct[]; last_page?: number }>(
+      env,
+      `/shops/${env.PRINTIFY_SHOP_ID}/products.json?limit=50&page=${page}`,
+    );
+    for (const p of body.data ?? []) {
+      if (p.blueprint_id !== POSTER_BLUEPRINT_ID) continue;
+      for (const v of p.variants ?? []) {
+        if (typeof v.cost === 'number' && !costByVariantId.has(v.id)) costByVariantId.set(v.id, v.cost);
+      }
+    }
+    if (!body.last_page || page >= body.last_page) break;
+    page++;
+  }
+
+  return costByVariantId;
+}
+
 /** Square poster variants plus the print provider Printify requires on product creation. */
-async function resolveSquareVariants(
+export async function resolveSquareVariants(
   env: Env,
   costByVariantId: Map<number, number>,
 ): Promise<{ providerId: number; variants: ResolvedVariant[] }> {
@@ -443,16 +530,7 @@ async function createAndPublish(
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse): Promise<void> {
-  const env: Env = {
-    PRINTIFY_API_KEY: process.env.PRINTIFY_API_KEY ?? '',
-    PRINTIFY_SHOP_ID: process.env.PRINTIFY_SHOP_ID ?? '',
-    PRINTIFY_STORE_DOMAIN: process.env.PRINTIFY_STORE_DOMAIN ?? 'citylines-art',
-    APP_ORIGIN: process.env.APP_ORIGIN ?? '',
-    UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
-    UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
-    PRINT_PROVIDER_ID: process.env.PRINT_PROVIDER_ID,
-    INCLUDE_LARGE: process.env.INCLUDE_LARGE,
-  };
+  const env: Env = readEnv();
 
   if (req.method === 'OPTIONS') {
     for (const [k, v] of Object.entries(corsHeaders(env, req))) res.setHeader(k, v);
@@ -588,7 +666,25 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
       match: { id: productId, external: { handle } },
       costByVariantId: scan.costByVariantId,
     });
-    send(env, req, res, { product_url: handle, product_id: handle.split('/').pop() }, 200);
+    // The authoritative prices, computed from the same harvested costs as the listing itself, so
+    // the gift page can correct its estimate instead of showing a figure Printify won't charge.
+    send(
+      env,
+      req,
+      res,
+      {
+        product_url: handle,
+        product_id: handle.split('/').pop(),
+        currency: shopCurrency(),
+        variants: variants.map((v) => ({
+          id: v.id,
+          title: v.title,
+          inches: squareInches(v.title) ?? 0,
+          priceCents: priceFor(v.cost),
+        })),
+      },
+      200,
+    );
   } catch (err) {
     console.error('create-printify failed:', err instanceof Error ? err.message : err);
     send(env, req, res, { error: 'Could not prepare your print. Please try again.' }, 500);

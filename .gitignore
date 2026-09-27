@@ -21,6 +21,10 @@ redis.txt
 token-printify.txt
 secrets*.txt
 *-secret*.txt
+# Reads the local secret files at runtime. Contains no secrets itself, but kept out of git so the
+# repo does not normalise credentials living in the project directory.
+scripts/dev-env.sh
+scripts/probe-pricing.ts
 
 # Editor directories and files
 .vscode/*

@@ -1,4 +1,4 @@
-import { ArtworkSettings, ColorPreset, FontFamily } from '@/types/artwork';
+import { ArtworkSettings, City, ColorPreset, FontFamily } from '@/types/artwork';
 import ColorPresets from './ColorPresets';
 import TypographyControls from './TypographyControls';
 import DownloadShare from './DownloadShare';
@@ -7,7 +7,8 @@ interface ControlPanelProps {
   settings: ArtworkSettings;
   onSettingsChange: (settings: ArtworkSettings) => void;
   svgRef: React.RefObject<SVGSVGElement | null>;
-  cityName: string;
+  /** The full city, not just its name: a gift link has to carry the bounding box to re-render. */
+  city: City;
   hasRoads: boolean;
   onTransparentChange: (value: boolean) => void;
 }
@@ -16,7 +17,7 @@ const ControlPanel = ({
   settings,
   onSettingsChange,
   svgRef,
-  cityName,
+  city,
   hasRoads,
   onTransparentChange,
 }: ControlPanelProps) => {
@@ -65,7 +66,7 @@ const ControlPanel = ({
 
           <DownloadShare
             svgRef={svgRef}
-            cityName={cityName}
+            city={city}
             settings={settings}
             textColor={settings.text}
             onTransparentChange={onTransparentChange}

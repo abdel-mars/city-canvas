@@ -11,13 +11,32 @@ interface ArtworkCanvasProps {
   settings: ArtworkSettings;
   isLoading: boolean;
   transparent?: boolean;
+  /** Any CSS size expression. Defaults to the creator's viewport-relative fit. */
+  size?: string;
+  /**
+   * Draw a theme-aware hairline and a deeper shadow around the artwork.
+   *
+   * The default edge is `rgba(0,0,0,0.04)`, which disappears behind a light page — a Minimal
+   * poster on the off-white ground needs the extra step to read as a physical print. The frame
+   * is also what separates a dark Classic poster from the dark theme, which is the default theme.
+   */
+  frame?: boolean;
+  /** Accessible name for the artwork, e.g. "Road network map of Lisbon, Minimal palette". */
+  label?: string;
 }
 
 const CANVAS_SIZE = 800;
 const PADDING = 60;
 
+/** The creator's existing edge, kept verbatim so an unframed canvas is pixel-identical. */
+const DEFAULT_SHADOW =
+  '0 12px 50px -10px rgba(0,0,0,0.20), 0 4px 16px -4px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04)';
+/** Framed variants get a deeper drop; the hairline comes from the border token instead. */
+const FRAMED_SHADOW =
+  '0 28px 70px -14px rgba(0,0,0,0.30), 0 10px 24px -8px rgba(0,0,0,0.16)';
+
 const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
-  ({ city, roads, settings, isLoading, transparent = false }, ref) => {
+  ({ city, roads, settings, isLoading, transparent = false, size, frame = false, label }, ref) => {
     const { background, road, text, font, textPositionY, customName, showCustomName, preset } = settings;
 
     const project = useMemo(() => {
@@ -72,7 +91,14 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
           animate={{ opacity: 1 }}
           transition={{ duration: 0.4 }}
         >
-          <div className="relative" style={{ maxHeight: '80vh', maxWidth: '80vh', aspectRatio: '1 / 1', width: '100%' }}>
+          <div
+            className={`relative ${frame ? 'ring-1 ring-border' : ''}`}
+            style={
+              size
+                ? { width: size, height: size, maxWidth: '100%', maxHeight: '100%', aspectRatio: '1 / 1' }
+                : { maxHeight: '80vh', maxWidth: '80vh', aspectRatio: '1 / 1', width: '100%' }
+            }
+          >
             <Skeleton className="w-full h-full rounded-xl" />
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="flex gap-2">
@@ -112,14 +138,13 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
         />
 
         <div
-          className="relative"
+          className={`relative ${frame ? 'ring-1 ring-border' : ''}`}
           style={{
-            width: 'min(90vh, 95vw, 800px)',
-            height: 'min(90vh, 95vw, 800px)',
+            width: size ?? 'min(90vh, 95vw, 800px)',
+            height: size ?? 'min(90vh, 95vw, 800px)',
             maxWidth: '100%',
             maxHeight: '100%',
-            boxShadow:
-              '0 12px 50px -10px rgba(0,0,0,0.20), 0 4px 16px -4px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.04)',
+            boxShadow: frame ? FRAMED_SHADOW : DEFAULT_SHADOW,
             borderRadius: '12px',
             // Dot pattern when transparent mode is active
             ...(transparent && {
@@ -134,6 +159,8 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
             ref={ref}
             viewBox={`0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}`}
             className="w-full h-full rounded-lg"
+            role={label ? 'img' : undefined}
+            aria-label={label}
             style={{
               aspectRatio: '1 / 1',
             }}

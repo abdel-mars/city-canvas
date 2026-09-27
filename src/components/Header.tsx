@@ -3,7 +3,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { AuthModal } from "./AuthModal";
 import CitySearch from "./CitySearch";
-import { Compass, User, LogOut, Image, Menu, X, Sun, Moon } from "lucide-react";
+import { Compass, User, LogOut, Image, Menu, X } from "lucide-react";
+import { ThemeToggle } from "./ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Link, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -19,7 +20,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ onCitySelect, showSearch = false, onLogoClick }) => {
   const { user, profile, logout, loading } = useAuth();
-  const { theme, toggleTheme, isTransitioning } = useTheme();
+  const { theme } = useTheme();
   const [authOpen, setAuthOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const navigate = useNavigate();
@@ -108,42 +109,7 @@ export const Header: React.FC<HeaderProps> = ({ onCitySelect, showSearch = false
             </nav>
 
             {/* Theme Toggle Button (utility — after nav) */}
-            <motion.button
-              onClick={toggleTheme}
-              disabled={isTransitioning}
-              whileTap={{ scale: 0.88 }}
-              whileHover={{ scale: 1.08 }}
-              aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
-              className={`relative flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl border transition-all duration-500 ${
-                isDark
-                  ? "border-zinc-800 bg-zinc-900 text-amber-300 hover:border-zinc-700 hover:bg-zinc-800"
-                  : "border-zinc-200 bg-zinc-100 text-zinc-700 hover:border-zinc-300 hover:bg-zinc-200"
-              }`}
-            >
-              <AnimatePresence mode="wait">
-                {isDark ? (
-                  <motion.span
-                    key="sun"
-                    initial={{ opacity: 0, rotate: -90, scale: 0.5 }}
-                    animate={{ opacity: 1, rotate: 0, scale: 1 }}
-                    exit={{ opacity: 0, rotate: 90, scale: 0.5 }}
-                    transition={{ duration: 0.25 }}
-                  >
-                    <Sun className="w-4 h-4" />
-                  </motion.span>
-                ) : (
-                  <motion.span
-                    key="moon"
-                    initial={{ opacity: 0, rotate: 90, scale: 0.5 }}
-                    animate={{ opacity: 1, rotate: 0, scale: 1 }}
-                    exit={{ opacity: 0, rotate: -90, scale: 0.5 }}
-                    transition={{ duration: 0.25 }}
-                  >
-                    <Moon className="w-4 h-4" />
-                  </motion.span>
-                )}
-              </AnimatePresence>
-            </motion.button>
+            <ThemeToggle />
 
             {/* Desktop Auth */}
             {!loading && (

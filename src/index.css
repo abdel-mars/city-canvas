@@ -94,3 +94,23 @@
     font-family: 'DM Sans', sans-serif;
   }
 }
+
+/*
+ * Gift page artwork size.
+ *
+ * Passed to ArtworkCanvas as `var(--gift-art-size)` because its `size` prop is an inline style,
+ * which cannot express a breakpoint. Mobile goes edge to edge so the poster fills the screen before
+ * any chrome appears; desktop is capped by both viewport height and width so the title and the
+ * action stay in reach on a short laptop.
+ */
+@layer components {
+  .gift-art {
+    --gift-art-size: 100vw;
+  }
+
+  @media (min-width: 640px) {
+    .gift-art {
+      --gift-art-size: min(78vh, 92vw, 860px);
+    }
+  }
+}

@@ -134,7 +134,7 @@ const Index = () => {
                   settings={settings}
                   onSettingsChange={setSettings}
                   svgRef={svgRef}
-                  cityName={selectedCity.name}
+                  city={selectedCity}
                   hasRoads={roads.length > 0}
                   onTransparentChange={handleTransparentChange}
                 />

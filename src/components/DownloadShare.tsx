@@ -10,21 +10,17 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import {
-  downloadArtwork,
-  downloadArtworkTransparent,
-  downloadSvg,
-  generateArtworkBase64,
-} from '@/lib/download';
-import { designHash } from '@/lib/designHash';
+import { downloadArtwork, downloadArtworkTransparent, downloadSvg } from '@/lib/download';
+import { giftUrl } from '@/lib/giftParams';
 import { toast } from 'sonner';
-import { ArtworkSettings } from '@/types/artwork';
+import { ArtworkSettings, City } from '@/types/artwork';
 
 type ExportFormat = 'png' | 'transparent' | 'svg';
 
 interface DownloadShareProps {
   svgRef: React.RefObject<SVGSVGElement | null>;
-  cityName: string;
+  /** The full city: a gift link carries the bounding box so the poster can be re-rendered. */
+  city: City;
   settings: ArtworkSettings;
   textColor: string;
   onTransparentChange: (value: boolean) => void;
@@ -36,110 +32,32 @@ const FORMAT_OPTIONS: { id: ExportFormat; label: string }[] = [
   { id: 'svg', label: 'SVG' },
 ];
 
-const DownloadShare = ({ svgRef, cityName, settings, textColor, onTransparentChange }: DownloadShareProps) => {
+const DownloadShare = ({ svgRef, city, settings, textColor, onTransparentChange }: DownloadShareProps) => {
   const [format, setFormat] = useState<ExportFormat>('png');
   const [isDownloading, setIsDownloading] = useState(false);
-  const [isPreparing, setIsPreparing] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  const filename = cityName.toLowerCase().replace(/\s+/g, '-');
+  const filename = city.name.toLowerCase().replace(/\s+/g, '-');
 
   const handleFormatChange = (f: ExportFormat) => {
     setFormat(f);
     onTransparentChange(f === 'transparent');
   };
 
-  /** First click only asks for confirmation. Deliberately opens no tab yet. */
   const handleGiftClick = () => {
-    if (!svgRef.current || isPreparing) return;
+    if (!svgRef.current) return;
     setConfirmOpen(true);
   };
 
-  const handleConfirmGift = async () => {
-    if (!svgRef.current || isPreparing) return;
+  /**
+   * Opens our own gift page, not Printify. The design lives in the URL, so this needs no upload,
+   * no artwork encoding and no waiting — which is what lets it run synchronously inside the click
+   * gesture, the only moment a new tab is reliably permitted. A new tab also keeps the editor
+   * intact, since its design lives in page state that a navigation would discard.
+   */
+  const handleConfirmGift = () => {
     setConfirmOpen(false);
-    setIsPreparing(true);
-    // Opened synchronously on the confirmation click: a window.open() after an await is usually
-    // blocked as a popup, and the click on "Gift it" is itself the gesture that allows it.
-    const tab = window.open('', '_blank');
-
-    const closeTab = () => {
-      tab?.close();
-    };
-
-    try {
-      const base64 = await generateArtworkBase64(svgRef.current, 5);
-      const payload = {
-        image_base64: base64,
-        // The city name is the only free text sent; the server builds the listing title
-        // and description itself.
-        city_name: cityName,
-        design_hash: designHash(cityName, settings),
-      };
-
-      let url: string | null = null;
-      for (let attempt = 0; attempt < 4 && !url; attempt++) {
-        if (attempt > 0) {
-          await new Promise((r) => setTimeout(r, 2500));
-        }
-
-        const res = await fetch('/api/create-printify', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          url = data?.product_url ?? null;
-          if (!url) {
-            closeTab();
-            toast.error('Could not prepare your print. Please try again.');
-            return;
-          }
-        } else if (res.status === 202) {
-          // The storefront has not handed back a URL yet. Retrying is safe: the request is
-          // keyed on the design hash, so it will only re-poll the product it already created.
-          continue;
-        } else if (res.status === 429) {
-          const data = await res.json().catch(() => null);
-          const mins = data?.retry_after ? Math.ceil(data.retry_after / 60) : null;
-          closeTab();
-          toast.error(
-            mins
-              ? `You've created a few prints already. Try again in about ${mins} minute${mins === 1 ? '' : 's'}.`
-              : 'Too many prints requested. Please try again later.',
-          );
-          return;
-        } else if (res.status === 404) {
-          closeTab();
-          toast.error('Printing is unavailable right now. Please try again later.');
-          return;
-        } else {
-          closeTab();
-          toast.error('Something went wrong preparing your print. Please try again.');
-          return;
-        }
-      }
-
-      if (!url) {
-        closeTab();
-        toast.error('Your print is still being prepared. Please try again in a moment.');
-        return;
-      }
-
-      if (tab) {
-        tab.location.href = url;
-      } else {
-        window.open(url, '_blank', 'noopener,noreferrer');
-      }
-    } catch (e) {
-      console.error('Buy failed:', e);
-      closeTab();
-      toast.error('Something went wrong. Please try again.');
-    } finally {
-      setIsPreparing(false);
-    }
+    window.open(giftUrl(city, settings), '_blank', 'noopener,noreferrer');
   };
 
   const handleDownload = async () => {
@@ -186,11 +104,10 @@ const DownloadShare = ({ svgRef, cityName, settings, textColor, onTransparentCha
 
         <button
           onClick={handleGiftClick}
-          disabled={isPreparing}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-accent text-accent-foreground rounded-xl text-sm font-medium hover:opacity-90 transition-opacity duration-200 disabled:opacity-50"
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-accent text-accent-foreground rounded-xl text-sm font-medium hover:opacity-90 transition-opacity duration-200"
         >
           <Gift className="w-4 h-4" />
-          {isPreparing ? 'Preparing…' : 'Gift it'}
+          Gift it
         </button>
 
         <button
@@ -211,9 +128,9 @@ const DownloadShare = ({ svgRef, cityName, settings, textColor, onTransparentCha
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Gift your {cityName} map?</AlertDialogTitle>
+            <AlertDialogTitle>Gift your {city.name} map?</AlertDialogTitle>
             <AlertDialogDescription>
-              Opens in Printify to choose a size and pay.
+              Opens a page for this poster, where you can pick a size and pay on Printify.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
