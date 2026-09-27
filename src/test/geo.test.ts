@@ -240,8 +240,8 @@ describe('transformRoads', () => {
 
     it('crops an oversized box to a window on the centre', () => {
       const out = clampBbox(moscow, 55.7558, 37.6173);
-      expect(out[2] - out[0]).toBeCloseTo(0.25, 6);
-      expect(out[3] - out[1]).toBeCloseTo(0.25, 6);
+      expect(out[2] - out[0]).toBeCloseTo(0.05, 6);
+      expect(out[3] - out[1]).toBeCloseTo(0.05, 6);
       // Centred on the point Nominatim gave us, not on the original box's corner.
       expect((out[0] + out[2]) / 2).toBeCloseTo(55.7558, 6);
       expect((out[1] + out[3]) / 2).toBeCloseTo(37.6173, 6);
@@ -330,8 +330,8 @@ describe('toCity', () => {
     expect(city).not.toBeNull();
     expect(isValidBbox(city!.boundingBox)).toBe(true);
     const [s, w, n, e] = city!.boundingBox;
-    expect(n - s).toBeCloseTo(0.25, 6);
-    expect(e - w).toBeCloseTo(0.25, 6);
+    expect(n - s).toBeCloseTo(0.05, 6);
+    expect(e - w).toBeCloseTo(0.05, 6);
   });
 
   it('clamps a whole prefecture, where only one result exists', () => {

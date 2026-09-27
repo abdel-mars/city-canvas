@@ -79,8 +79,20 @@ const REQUESTS_PER_HOUR = 60;
 /** Largest accepted bounding-box span, in degrees. Roughly a large metropolitan area. */
 const MAX_BBOX_SPAN = 0.35;
 
-/** Span used when a Nominatim box is too big: a ~28 km window on the city centre. */
-const CLAMP_SPAN = 0.25;
+/**
+ * Span used when a Nominatim box is too big.
+ *
+ * Measured, not guessed. Central Tokyo answers 0.05° with ~4,000 ways but runs out of memory at
+ * 0.07°, and central Moscow behaves the same way — that is Overpass's own ceiling, reached long
+ * before our MAX_WAYS/MAX_POINTS truncation ever applies. So the clamp is set just under the
+ * observed limit rather than just under MAX_BBOX_SPAN: a wider window produces a prettier crop but
+ * fails on exactly the megacities people most want to print, and it now fails honestly (503) rather
+ * than being blamed on the city.
+ *
+ * 0.05° is roughly 5.5 km — a dense city-centre district. Only cities whose Nominatim box is
+ * oversized get it; ordinary cities keep their natural, much larger extent.
+ */
+const CLAMP_SPAN = 0.05;
 
 /**
  * Slip roads (`*_link`) are excluded on purpose: they are short motorway ramps that dominate
