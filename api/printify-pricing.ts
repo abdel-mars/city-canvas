@@ -12,7 +12,7 @@ import {
   type ApiRequest,
   type ApiResponse,
   type Env,
-} from './create-printify';
+} from './_printify-shared';
 
 /**
  * Read-only poster pricing for the gift page.

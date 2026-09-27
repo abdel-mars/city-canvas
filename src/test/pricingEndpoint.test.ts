@@ -153,7 +153,7 @@ describe('redisPipeline / bumpMany', () => {
   it('unwraps the { result } envelope so counts are numbers', async () => {
     // Captured verbatim from Upstash: [{"result":1},{"result":1},{"result":2},{"result":1}]
     stubRedis([{ result: 1 }, { result: 1 }, { result: 2 }, { result: 1 }]);
-    const { bumpMany } = await import('../../api/create-printify');
+    const { bumpMany } = await import('../../api/_printify-shared');
 
     await expect(
       bumpMany(REDIS_URL, 't', [{ key: 'a', ttl: 60 }, { key: 'b', ttl: 60 }]),
@@ -164,7 +164,7 @@ describe('redisPipeline / bumpMany', () => {
     // The bug this pins: Number({result: 31}) is NaN, and NaN > 30 is false, so a breached
     // limit would read as "not limited" and the endpoint would stay open.
     stubRedis([{ result: 31 }, { result: 1 }]);
-    const { bumpMany } = await import('../../api/create-printify');
+    const { bumpMany } = await import('../../api/_printify-shared');
 
     const [count] = await bumpMany(REDIS_URL, 't', [{ key: 'a', ttl: 60 }]);
     expect(Number.isNaN(count)).toBe(false);
@@ -175,14 +175,14 @@ describe('redisPipeline / bumpMany', () => {
   it('throws when a command fails inside a 200 response', async () => {
     // The other trap geo.ts documents: a bad command is not an HTTP error.
     stubRedis([{ error: 'WRONGTYPE' }, { result: 1 }]);
-    const { redisPipeline } = await import('../../api/create-printify');
+    const { redisPipeline } = await import('../../api/_printify-shared');
 
     await expect(redisPipeline(REDIS_URL, 't', [['GET', 'a']])).rejects.toThrow(/WRONGTYPE/);
   });
 
   it('throws on a non-2xx status', async () => {
     vi.stubGlobal('fetch', async () => new Response('nope', { status: 401 }));
-    const { redisPipeline } = await import('../../api/create-printify');
+    const { redisPipeline } = await import('../../api/_printify-shared');
 
     await expect(redisPipeline(REDIS_URL, 't', [['PING']])).rejects.toThrow(/401/);
   });
