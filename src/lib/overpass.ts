@@ -21,6 +21,7 @@ export async function fetchRoads(bbox: BBox): Promise<Road[]> {
     const error = new Error('Failed to fetch road data') as Error & { code?: string };
     if (res.status === 429) error.code = 'rate_limited';
     else if (res.status === 503) error.code = 'upstream_unavailable';
+    else if (res.status === 400) error.code = 'bbox_too_large';
     else error.code = 'bad_request';
     throw error;
   }

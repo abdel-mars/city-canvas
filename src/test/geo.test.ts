@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import geoHandler, {
   simplifyLine,
   isValidBbox,
+  clampBbox,
   clientIp,
   userAgent,
   transformRoads,
@@ -202,11 +203,65 @@ describe('transformRoads', () => {
     expect(roads).toHaveLength(1);
   });
 
-  it('tolerates a missing elements array', () => {
-    expect(transformRoads({}).roads).toEqual([]);
-    expect(transformRoads(null).roads).toEqual([]);
+    it('tolerates a missing elements array', () => {
+      expect(transformRoads({}).roads).toEqual([]);
+      expect(transformRoads(null).roads).toEqual([]);
+    });
+
+    it('surfaces an Overpass remark, which arrives inside a 200 response', () => {
+      // Overpass reports timeouts and maxsize overruns in a top-level `remark` and still returns
+      // HTTP 200, sometimes with no elements at all. Reading only `elements` turns that into an
+      // empty map, which the caller would cache for a month and blame on the city.
+      const timedOut = transformRoads({
+        remark: 'runtime error: Query timed out in "query" at line 1',
+        elements: [],
+      });
+      expect(timedOut.roads).toEqual([]);
+      expect(timedOut.remark).toMatch(/timed out/i);
+
+      const tooBig = transformRoads({ remark: 'runtime error: Query exceeded the maximum size' });
+      expect(tooBig.remark).toMatch(/maximum size/i);
+    });
+
+    it('reports no remark on a clean response', () => {
+      const clean = transformRoads({ elements: [element(1, 'primary', 38.7, -9.1)] });
+      expect(clean.remark).toBeNull();
+    });
   });
-});
+
+  describe('clampBbox', () => {
+    // Moscow: Nominatim returns the whole metro region, which is rejected outright.
+    const moscow: [number, number, number, number] = [55.1422, 36.8031, 56.0212, 37.9674];
+
+    it('leaves a box that already fits alone', () => {
+      const lisbon: [number, number, number, number] = [38.7, -9.2, 38.75, -9.1];
+      expect(clampBbox(lisbon, 38.72, -9.14)).toEqual(lisbon);
+    });
+
+    it('crops an oversized box to a window on the centre', () => {
+      const out = clampBbox(moscow, 55.7558, 37.6173);
+      expect(out[2] - out[0]).toBeCloseTo(0.25, 6);
+      expect(out[3] - out[1]).toBeCloseTo(0.25, 6);
+      // Centred on the point Nominatim gave us, not on the original box's corner.
+      expect((out[0] + out[2]) / 2).toBeCloseTo(55.7558, 6);
+      expect((out[1] + out[3]) / 2).toBeCloseTo(37.6173, 6);
+    });
+
+    it('always produces a box the proxy will accept', () => {
+      for (const lat of [0, 55.7558, -33.8688, 89.9, -89.9]) {
+        for (const lon of [0, 37.6173, -122.4, 179.9, -179.9]) {
+          expect(isValidBbox(clampBbox(moscow, lat, lon))).toBe(true);
+        }
+      }
+    });
+
+    it('cannot land on the boundary that a float comparison would reject', () => {
+      // A box built to exactly MAX_BBOX_SPAN measures 0.3500000000000014, which fails
+      // `span > MAX_BBOX_SPAN`. The clamp stays well under so that never happens.
+      const out = clampBbox(moscow, 55.7558, 37.6173);
+      expect(out[2] - out[0]).toBeLessThan(0.35);
+    });
+  });
 
 describe('normaliseQuery', () => {
   it('trims and collapses whitespace', () => {
@@ -257,6 +312,40 @@ describe('toCity', () => {
   it('rejects results without a usable bbox or coordinates', () => {
     expect(toCity({ display_name: 'x', lat: 'a', lon: 'b', boundingbox: [] })).toBeNull();
     expect(toCity({ display_name: 'x', lat: '1', lon: '2' })).toBeNull();
+  });
+
+  it('clamps a metro-sized result so it can actually be rendered', () => {
+    // This is the real Nominatim payload for "Moscow": the whole metro region, 0.88 x 1.16.
+    // Before clamping, picking it from the dropdown produced a 400 and the message
+    // "choose a smaller city".
+    const city = toCity({
+      name: 'Moscow',
+      display_name: 'Moscow, Russia',
+      lat: '55.7558',
+      lon: '37.6173',
+      // Nominatim orders this south, north, west, east.
+      boundingbox: ['55.1422', '56.0212', '36.8031', '37.9674'],
+    } as never);
+
+    expect(city).not.toBeNull();
+    expect(isValidBbox(city!.boundingBox)).toBe(true);
+    const [s, w, n, e] = city!.boundingBox;
+    expect(n - s).toBeCloseTo(0.25, 6);
+    expect(e - w).toBeCloseTo(0.25, 6);
+  });
+
+  it('clamps a whole prefecture, where only one result exists', () => {
+    // Tokyo comes back as 15.7 x 18.4 degrees. Filtering instead of clamping would remove the
+    // single option and make the city unsearchable.
+    const city = toCity({
+      name: 'Tokyo',
+      display_name: 'Tokyo, Japan',
+      lat: '35.6762',
+      lon: '139.6503',
+      boundingbox: ['34.8343', '36.5185', '130.4743', '148.8263'],
+    } as never);
+    expect(city).not.toBeNull();
+    expect(isValidBbox(city!.boundingBox)).toBe(true);
   });
 });
 
@@ -399,5 +488,108 @@ describe('geo endpoint', () => {
     expect(upstreamCalls).toBe(1);
     expect((second.body as { cached: boolean }).cached).toBe(true);
     expect((second.body as { roads: unknown[] }).roads).toHaveLength(1);
+  });
+
+  describe('does not cache a result it should not trust', () => {
+    const emptyUpstream = (remark?: string) => {
+      const body: Record<string, unknown> = { elements: [] };
+      if (remark) body.remark = remark;
+      return () =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+    };
+
+    it('fails a timed-out query rather than reporting an empty map', async () => {
+      // Overpass answers 200 with a remark and no elements. Returning that as an empty city makes
+      // the visitor think the place has no roads, when a retry would have worked.
+      mockFetch(emptyUpstream('runtime error: Query timed out in "query" at line 1'));
+      const res = await call(geoHandler, { kind: 'roads', bbox: [35.5, 139.4, 35.7, 139.7] });
+
+      expect(res.status).toBe(503);
+      expect((res.body as { error: string }).error).toBe('upstream_unavailable');
+    });
+
+    it('fails when Overpass exceeds maxsize', async () => {
+      mockFetch(emptyUpstream('runtime error: Query exceeded the maximum size'));
+      const res = await call(geoHandler, { kind: 'roads', bbox: [35.5, 139.4, 35.7, 139.7] });
+      expect(res.status).toBe(503);
+    });
+
+    it('never caches an empty result, so one bad hour is not a month-long verdict', async () => {
+      // The regression that made a city look permanently broken: an empty array written to Redis
+      // with a 7-day fresh and 30-day stale TTL, after which every visit replayed "no roads".
+      let upstreamCalls = 0;
+      mockFetch(() => {
+        upstreamCalls++;
+        return emptyUpstream()();
+      });
+
+      const bbox = [10.1, 20.1, 10.2, 20.2];
+      const first = await call(geoHandler, { kind: 'roads', bbox });
+      expect(first.status).toBe(503);
+      expect(upstreamCalls).toBe(1);
+
+      // A second visit must retry upstream rather than replay a cached failure.
+      const second = await call(geoHandler, { kind: 'roads', bbox });
+      expect(second.status).toBe(503);
+      expect(upstreamCalls).toBe(2);
+    });
+
+    it('recovers on retry once the upstream behaves', async () => {
+      let attempt = 0;
+      mockFetch(() => {
+        attempt++;
+        if (attempt === 1) return emptyUpstream('runtime error: Query timed out')();
+        return new Response(
+          JSON.stringify({
+            elements: [
+              {
+                type: 'way',
+                id: 5,
+                tags: { highway: 'primary' },
+                geometry: [
+                  { lat: 38.7, lon: -9.1 },
+                  { lat: 38.71, lon: -9.11 },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      });
+
+      const bbox = [41.1, 2.1, 41.2, 2.2];
+      expect((await call(geoHandler, { kind: 'roads', bbox })).status).toBe(503);
+
+      const retry = await call(geoHandler, { kind: 'roads', bbox });
+      expect(retry.status).toBe(200);
+      expect((retry.body as { roads: unknown[] }).roads).toHaveLength(1);
+    });
+
+    it('exposes whether a map was cut short', async () => {
+      mockFetch(() =>
+        new Response(
+          JSON.stringify({
+            elements: [
+              {
+                type: 'way',
+                id: 1,
+                tags: { highway: 'primary' },
+                geometry: [
+                  { lat: 38.7, lon: -9.1 },
+                  { lat: 38.71, lon: -9.11 },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+      const res = await call(geoHandler, { kind: 'roads', bbox: [42.1, 3.1, 42.2, 3.2] });
+      // Not truncated here, but the field is always present so a partial map is detectable.
+      expect((res.body as { truncated: boolean }).truncated).toBe(false);
+    });
   });
 });

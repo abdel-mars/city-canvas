@@ -79,6 +79,9 @@ const REQUESTS_PER_HOUR = 60;
 /** Largest accepted bounding-box span, in degrees. Roughly a large metropolitan area. */
 const MAX_BBOX_SPAN = 0.35;
 
+/** Span used when a Nominatim box is too big: a ~28 km window on the city centre. */
+const CLAMP_SPAN = 0.25;
+
 /**
  * Slip roads (`*_link`) are excluded on purpose: they are short motorway ramps that dominate
  * the way count while adding visual clutter rather than readable structure.
@@ -280,8 +283,23 @@ function round5(n: number): number {
 }
 
 /** Simplifies and compacts the raw Overpass payload. */
-export function transformRoads(data: unknown): { roads: CompactRoad[]; truncated: boolean } {
-  const elements = ((data as { elements?: unknown[] } | null)?.elements ?? []) as OverpassWay[];
+export interface TransformedRoads {
+  roads: CompactRoad[];
+  truncated: boolean;
+  /**
+   * Overpass's own diagnosis, present when the query timed out or blew past `maxsize`.
+   *
+   * Overpass reports these in a top-level `remark` while still returning HTTP 200, sometimes with
+   * no `elements` at all. Reading only `elements` turns a transient upstream failure into an empty
+   * result, which is indistinguishable from "this area genuinely has no roads".
+   */
+  remark: string | null;
+}
+
+export function transformRoads(data: unknown): TransformedRoads {
+  const body = (data ?? {}) as { elements?: unknown[]; remark?: unknown };
+  const elements = (Array.isArray(body.elements) ? body.elements : []) as OverpassWay[];
+  const remark = typeof body.remark === 'string' && body.remark.trim() ? body.remark.trim() : null;
   const roads: CompactRoad[] = [];
   let points = 0;
   let truncated = false;
@@ -311,7 +329,7 @@ export function transformRoads(data: unknown): { roads: CompactRoad[]; truncated
   }
 
   if (truncated) console.warn(`transformRoads: truncated at ${roads.length} ways / ${points} points`);
-  return { roads, truncated };
+  return { roads, truncated, remark };
 }
 
 interface NominatimResult {
@@ -321,6 +339,31 @@ interface NominatimResult {
   lon?: string;
   boundingbox?: string[];
   address?: Record<string, string>;
+}
+
+/**
+ * Clamp a Nominatim box down to something Overpass can actually answer.
+ *
+ * Nominatim frequently returns an administrative area rather than the city: Tokyo comes back as
+ * the whole prefecture at 15.7° x 18.4°, Berlin as 0.34° x 0.67°. Those are rejected outright by
+ * isValidBbox, so before this the user could pick a city straight from the dropdown and be met
+ * with a 400 and "choose a smaller city" — advice they cannot act on.
+ *
+ * A centred crop is far better than a refusal: 0.25° is roughly 28 km, which frames a dense city
+ * centre rather nicely, and it keeps the three biggest metro names usable. Deliberately under
+ * MAX_BBOX_SPAN so the arithmetic cannot land on the boundary — a box built to exactly 0.35
+ * measures 0.3500000000000014 in floating point and would be rejected anyway.
+ */
+export function clampBbox(bbox: [number, number, number, number], lat: number, lon: number): [number, number, number, number] {
+  const [south, west, north, east] = bbox;
+  if (north - south <= MAX_BBOX_SPAN && east - west <= MAX_BBOX_SPAN) return bbox;
+
+  const half = CLAMP_SPAN / 2;
+  // Clamp the centre into valid coordinate space so a box near a pole or the antimeridian cannot
+  // wrap or invert.
+  const cLat = Math.min(Math.max(lat, -90 + half), 90 - half);
+  const cLon = Math.min(Math.max(lon, -180 + half), 180 - half);
+  return [cLat - half, cLon - half, cLat + half, cLon + half];
 }
 
 /** Maps a Nominatim result onto the app's own City shape, server-side. */
@@ -343,7 +386,7 @@ export function toCity(r: NominatimResult): City | null {
     lat,
     lon,
     // Nominatim orders boundingbox as south, north, west, east.
-    boundingBox: [bb[0], bb[2], bb[1], bb[3]],
+    boundingBox: clampBbox([bb[0], bb[2], bb[1], bb[3]], lat, lon),
   };
 }
 
@@ -517,15 +560,27 @@ async function handleRoads(
   }
 
   try {
+    let truncated = false;
     const roads = await singleFlight(key, async () => {
       const again = await cacheGet<CompactRoad[]>(key, ROADS_FRESH_TTL);
       if (again?.fresh) return again.value;
       const data = await fetchOverpass(buildRoadsQuery(bbox));
-      const { roads: list } = transformRoads(data);
+      const { roads: list, truncated: cut, remark } = transformRoads(data);
+
+      // A query Overpass could not finish is not a city with no roads. Caching either would poison
+      // the entry for 7 days fresh and 30 days stale, and the visitor is told to pick a different
+      // city when in fact a retry would have worked. Only a clean, non-empty result is cacheable.
+      if (remark) throw new Error(`overpass: ${remark}`);
+      if (list.length === 0) throw new Error('overpass: no road elements in this area');
+      if (cut) {
+        truncated = true;
+        console.warn(`geo: truncated map at ${list.length} ways for bbox ${bbox.join(',')}`);
+      }
+
       await cacheSet(key, list, ROADS_FRESH_TTL, ROADS_STALE_TTL);
       return list;
     });
-    res.status(200).json({ roads, cached: false });
+    res.status(200).json({ roads, cached: false, truncated });
   } catch (err) {
     console.error('geo roads failed:', err instanceof Error ? err.message : err);
     res.status(503).json({ error: 'upstream_unavailable' });

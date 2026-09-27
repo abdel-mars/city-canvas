@@ -36,8 +36,13 @@ export function useRoadData() {
         setError('Too many map searches from this network. Please try again in a few minutes.');
       } else if (code === 'upstream_unavailable') {
         setError('Road data is temporarily unavailable. Please try again in a moment.');
+      } else if (code === 'bbox_too_large') {
+        // The proxy refused the area rather than failing. "Choose a smaller city" was useless:
+        // the visitor cannot make a city smaller, and the only oversized boxes that still reach
+        // here are hand-edited or pre-clamp gift links.
+        setError('This map area is too large to render. Try searching for the city again.');
       } else {
-        setError('Could not load roads. Please try again or choose a smaller city.');
+        setError('Could not load roads. Please try again in a moment.');
       }
       console.error('Road loading error:', e);
     } finally {

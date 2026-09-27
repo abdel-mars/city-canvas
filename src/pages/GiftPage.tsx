@@ -63,7 +63,10 @@ const GiftPage = () => {
   const decoded = useMemo(() => decodeGiftParams(params), [params]);
   const { city, settings } = decoded.ok ? decoded.design : { city: null, settings: null };
 
-  const { roads, isLoading, loadRoads } = useRoadData();
+  // `error` is the geo failure; the local `error` below is for the purchase. Conflating them, or
+  // forgetting to read this one, is how a gift link for an unrenderable area ends up as a blank
+  // poster with no explanation.
+  const { roads, isLoading, error: geoError, loadRoads } = useRoadData();
   const svgRef = useRef<SVGSVGElement>(null);
 
   const [variants, setVariants] = useState<PosterVariant[] | null>(null);
@@ -248,6 +251,17 @@ const GiftPage = () => {
         >
           A City Lines Art poster
         </motion.p>
+
+        {geoError && (
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            role="alert"
+            className="mt-4 max-w-sm text-[13px] text-destructive"
+          >
+            {geoError}
+          </motion.p>
+        )}
 
         <motion.div {...fade(0.3)} className="gift-art mt-6 sm:mt-8 w-screen sm:w-auto">
           <ArtworkCanvas
