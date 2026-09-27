@@ -153,7 +153,7 @@ describe('redisPipeline / bumpMany', () => {
   it('unwraps the { result } envelope so counts are numbers', async () => {
     // Captured verbatim from Upstash: [{"result":1},{"result":1},{"result":2},{"result":1}]
     stubRedis([{ result: 1 }, { result: 1 }, { result: 2 }, { result: 1 }]);
-    const { bumpMany } = await import('../../api/_printify-shared');
+    const { bumpMany } = await import('../../api/create-printify');
 
     await expect(
       bumpMany(REDIS_URL, 't', [{ key: 'a', ttl: 60 }, { key: 'b', ttl: 60 }]),
@@ -164,7 +164,7 @@ describe('redisPipeline / bumpMany', () => {
     // The bug this pins: Number({result: 31}) is NaN, and NaN > 30 is false, so a breached
     // limit would read as "not limited" and the endpoint would stay open.
     stubRedis([{ result: 31 }, { result: 1 }]);
-    const { bumpMany } = await import('../../api/_printify-shared');
+    const { bumpMany } = await import('../../api/create-printify');
 
     const [count] = await bumpMany(REDIS_URL, 't', [{ key: 'a', ttl: 60 }]);
     expect(Number.isNaN(count)).toBe(false);
@@ -175,16 +175,45 @@ describe('redisPipeline / bumpMany', () => {
   it('throws when a command fails inside a 200 response', async () => {
     // The other trap geo.ts documents: a bad command is not an HTTP error.
     stubRedis([{ error: 'WRONGTYPE' }, { result: 1 }]);
-    const { redisPipeline } = await import('../../api/_printify-shared');
+    const { redisPipeline } = await import('../../api/create-printify');
 
     await expect(redisPipeline(REDIS_URL, 't', [['GET', 'a']])).rejects.toThrow(/WRONGTYPE/);
   });
 
   it('throws on a non-2xx status', async () => {
     vi.stubGlobal('fetch', async () => new Response('nope', { status: 401 }));
-    const { redisPipeline } = await import('../../api/_printify-shared');
+    const { redisPipeline } = await import('../../api/create-printify');
 
     await expect(redisPipeline(REDIS_URL, 't', [['PING']])).rejects.toThrow(/401/);
+  });
+});
+
+describe('the two copies of the pricing arithmetic agree', () => {
+  /**
+   * api/printify-pricing.ts and api/create-printify.ts each carry their own copy of `priceFor`,
+   * the cost table and variant resolution, because Vercel will not let two files in api/ import
+   * each other. This is the guard against that duplication drifting: if the gift page quotes a
+   * figure the checkout then contradicts, it will show up here first.
+   */
+  it('produces identical prices from identical costs', async () => {
+    const { priceFor: createPriceFor } = await import('../../api/create-printify');
+    const { priceFor: pricingPriceFor } = await import('../../api/printify-pricing');
+
+    const costs = [200, 786, 895, 1187, 1314, 1396, 1481, 3060];
+    for (const cost of costs) {
+      expect(pricingPriceFor(cost)).toBe(createPriceFor(cost));
+    }
+  });
+
+  it('produces identical prices for every live variant cost', async () => {
+    const { priceFor: createPriceFor, squareInches } = await import('../../api/create-printify');
+    const { priceFor: pricingPriceFor } = await import('../../api/printify-pricing');
+
+    // The values harvestSquareCosts reads from the live shop.
+    for (const [inches, cost] of [[16, 1187], [20, 1314], [24, 1481]] as [number, number][]) {
+      expect(pricingPriceFor(cost)).toBe(createPriceFor(cost));
+      expect(squareInches(`${inches}″ x ${inches}″ / Matte`)).toBe(inches);
+    }
   });
 });
 
