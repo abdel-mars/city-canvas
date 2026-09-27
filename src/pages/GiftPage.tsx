@@ -355,6 +355,20 @@ const GiftPage = () => {
 
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 mt-24 pb-10">
         <div className="border-t border-border" />
+        {/* This page renders OpenStreetMap road data and is public and shareable, so the ODbL
+            attribution travels with it. */}
+        <p className="mt-4 text-[11px] text-muted-foreground/50 tracking-wide">
+          Map data ©{' '}
+          <a
+            href="https://www.openstreetmap.org/copyright"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-[3px] decoration-muted-foreground/30 transition-colors duration-200 hover:text-foreground hover:decoration-foreground/60 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            OpenStreetMap
+          </a>{' '}
+          contributors
+        </p>
       </div>
 
       {/* Mobile: keep the action reachable once the in-flow button has scrolled away. */}

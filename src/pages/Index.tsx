@@ -4,11 +4,21 @@ import CitySearch from '@/components/CitySearch';
 import ArtworkCanvas from '@/components/ArtworkCanvas';
 import ControlPanel from '@/components/ControlPanel';
 import BackgroundArt from '@/components/BackgroundArt';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { City, ArtworkSettings } from '@/types/artwork';
 import { colorPresets } from '@/lib/presets';
 import { useRoadData } from '@/hooks/useRoadData';
+import { useTheme } from '@/hooks/useTheme';
+
+/** Shared by the OpenStreetMap and Mars links so both read identically. */
+const CREDIT_LINK =
+  'underline underline-offset-[3px] decoration-muted-foreground/30 transition-colors duration-200 ' +
+  'hover:text-foreground hover:decoration-foreground/60 rounded-sm ' +
+  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background';
 
 const Index = () => {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const [selectedCity, setSelectedCity] = useState<City | null>(null);
   const [settings, setSettings] = useState<ArtworkSettings>({
     preset: colorPresets[0],
@@ -46,6 +56,11 @@ const Index = () => {
             exit={{ opacity: 0, transition: { duration: 0.3 } }}
             className="min-h-screen flex flex-col items-center justify-center px-6 relative z-10"
           >
+            {/* Outside the centred flow, so the hero composition does not shift. */}
+            <div className="absolute top-4 right-4 sm:top-5 sm:right-6">
+              <ThemeToggle />
+            </div>
+
             <BackgroundArt />
 
             <motion.div
@@ -54,7 +69,15 @@ const Index = () => {
               transition={{ delay: 0.15, duration: 0.6, ease: 'easeOut' }}
               className="text-center mb-10"
             >
-              <h1 className="text-5xl md:text-6xl font-display tracking-tight text-foreground mb-3" style={{ textShadow: '0 4px 24px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.15)' }}>
+              {/* A dark glow only makes sense behind light text on a dark page. */}
+              <h1
+                className="text-5xl md:text-6xl font-display tracking-tight text-foreground mb-3"
+                style={
+                  isDark
+                    ? { textShadow: '0 4px 24px rgba(0,0,0,0.35), 0 1px 2px rgba(0,0,0,0.15)' }
+                    : undefined
+                }
+              >
                 City Lines
               </h1>
               <p className="text-muted-foreground text-lg font-light">
@@ -66,7 +89,10 @@ const Index = () => {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.35, duration: 0.6, ease: 'easeOut' }}
-              className="w-full max-w-md bg-white/40 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/20"
+              /* White glass on a cream page loses its edge, so light mode gets a real border. */
+              className={`w-full max-w-md backdrop-blur-xl rounded-2xl shadow-2xl border ${
+                isDark ? 'bg-white/40 border-white/20' : 'bg-white/70 border-zinc-200'
+              }`}
             >
               <CitySearch onSelect={handleCitySelect} />
             </motion.div>
@@ -77,7 +103,26 @@ const Index = () => {
               transition={{ delay: 0.8, duration: 0.6 }}
               className="mt-16 text-xs text-muted-foreground/50 tracking-wide"
             >
-              Powered by OpenStreetMap
+              Powered by{' '}
+              {/* ODbL asks that attribution link to the copyright page. */}
+              <a
+                href="https://www.openstreetmap.org/copyright"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={CREDIT_LINK}
+              >
+                OpenStreetMap
+              </a>
+              <span aria-hidden="true"> · </span>
+              Designed by{' '}
+              <a
+                href="https://elmahmoudi.42web.io/?i=1"
+                target="_blank"
+                rel="noopener noreferrer"
+                className={CREDIT_LINK}
+              >
+                Mars
+              </a>
             </motion.p>
           </motion.div>
         ) : (
@@ -100,6 +145,7 @@ const Index = () => {
               <div className="flex-1 max-w-sm">
                 <CitySearch onSelect={handleCitySelect} compact />
               </div>
+              <ThemeToggle />
             </header>
 
             {/* Main content */}
