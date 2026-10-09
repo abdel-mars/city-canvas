@@ -7,7 +7,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { decodeGiftParams } from '@/lib/giftParams';
 import { designHash } from '@/lib/designHash';
 import { formatPrice, type PosterVariant } from '@/lib/price';
-import { generateArtworkBase64 } from '@/lib/download';
+import { generatePrintArtworkBase64 } from '@/lib/download';
 import { useRoadData } from '@/hooks/useRoadData';
 import { useNoindex } from '@/hooks/useNoindex';
 import { useTheme } from '@/hooks/useTheme';
@@ -141,7 +141,7 @@ const GiftPage = () => {
 
     try {
       const payload = {
-        image_base64: await generateArtworkBase64(svgRef.current, 5),
+        image_base64: await generatePrintArtworkBase64(svgRef.current, 5),
         city_name: city.name,
         design_hash: designHash(city.name, settings),
       };
@@ -183,6 +183,14 @@ const GiftPage = () => {
           return;
         } else if (res.status === 404) {
           fail('Printing is unavailable right now. Please try again later.');
+          return;
+        } else if (res.status === 413) {
+          // The artwork is denser than the upload path can carry. Reachable two ways: our own
+          // payload_too_large, or Vercel rejecting the body before the function runs. Either way
+          // this is actionable advice for the visitor, not a transient fault to retry.
+          fail(
+            'This poster is too detailed to upload. Try a smaller area of the city, or a different palette.',
+          );
           return;
         } else {
           fail('Something went wrong preparing your poster. Please try again.');

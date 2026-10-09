@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import handler, { clientIp, isPlausibleBase64 } from '../../api/create-printify';
+import handler, { clientIp, isOversizeBase64, isPlausibleBase64 } from '../../api/create-printify';
 import type { ApiRequest, ApiResponse } from '../../api/create-printify';
 
 const B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
@@ -142,6 +142,13 @@ describe('isPlausibleBase64', () => {
   it('rejects payloads beyond the cap', () => {
     expect(isPlausibleBase64('A'.repeat(4_000_004))).toBe(false);
   });
+
+  it('distinguishes oversize from malformed, so the two get different status codes', () => {
+    expect(isOversizeBase64('A'.repeat(4_000_004))).toBe(true);
+    // Right length, wrong alphabet: a format problem, not a size one.
+    expect(isOversizeBase64('!'.repeat(64))).toBe(false);
+    expect(isPlausibleBase64('!'.repeat(64))).toBe(false);
+  });
 });
 
 describe('endpoint: method and CORS', () => {
@@ -209,6 +216,34 @@ describe('endpoint: request body cap', () => {
     expect(res.status).toBe(413);
     expect(calls.printify).toBe(0);
     expect(calls.redis).toBe(0);
+  });
+
+  /**
+   * A chunked request arrives with no Content-Length, so the cap has to be re-applied to the
+   * decoded payload. It must answer 413, not 400: an oversize body is a size problem, and
+   * reporting it as malformed base64 sent the client down the wrong path entirely.
+   */
+  it('rejects an over-length payload as too large even with no declared Content-Length', async () => {
+    const { calls } = mockUpstream();
+    const res = await call({ ...validBody, image_base64: 'A'.repeat(4_000_004) });
+    expect(res.status).toBe(413);
+    expect(res.body).toEqual({ error: 'payload_too_large' });
+    expect(calls.printify).toBe(0);
+    expect(calls.redis).toBe(0);
+  });
+
+  /**
+   * The bug this guards: a dense city's artwork exceeded the cap and the client reported
+   * "Something went wrong" because it discarded the body. Artwork size tracks road density —
+   * one city measures 1.83 MB as JPEG and 3.43 MB as PNG — so the endpoint has to keep the
+   * distinction between "too big" and "corrupt" legible all the way to the client.
+   */
+  it('still reports a merely invalid payload as malformed, not oversize', async () => {
+    const { calls } = mockUpstream();
+    const res = await call({ ...validBody, image_base64: 'not base64!!' });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'image_base64 is required and must be valid base64' });
+    expect(calls.printify).toBe(0);
   });
 });
 

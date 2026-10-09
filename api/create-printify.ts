@@ -22,9 +22,23 @@ const PRICE_MULTIPLIER = 2.2;
 const POLL_INTERVAL_MS = 1500;
 const POLL_ATTEMPTS = 10;
 
-// Real payloads measure ~0.41 MB of base64. Vercel rejects bodies over 4.5 MB at the platform
-// level, so this sits below that to keep the check ours and the limit honest.
+/**
+ * Body ceiling for the artwork upload.
+ *
+ * Vercel rejects bodies over 4.5 MB at the platform level, before this function runs, so raising
+ * this above ~4.4 MB buys nothing — a larger cap would only mean our 413 stops firing and the
+ * platform's takes over, with no JSON body for the client to read. It sits below the platform
+ * limit so the check is ours and the client gets a real error code.
+ *
+ * Do NOT tune this against a measured payload. Artwork size tracks road density, not a constant:
+ * at scale 5 the same city measures 1.83 MB (Minimal), 1.89 MB (Classic) and 2.48 MB (Neon) as
+ * JPEG, and Neon was 12.99 MB as PNG — the neon glow is a large smooth gradient that PNG
+ * compresses terribly. An earlier revision of this comment claimed "real payloads measure ~0.41 MB",
+ * measured once on a sparse city, and the cap was cut from 6 MB on that basis; every dense poster
+ * then failed with an opaque error. The client sends JPEG for exactly this reason.
+ */
 const MAX_BODY_BYTES = 4_000_000;
+/** Base64 is ~4/3 of the raw bytes, plus ~66 bytes of JSON envelope. See the note above. */
 const MAX_BASE64_CHARS = 4_000_000;
 
 /**
@@ -140,9 +154,16 @@ export function clientIp(headers: ApiRequest['headers']): string {
 
 export function isPlausibleBase64(value: string): boolean {
   if (!value) return false;
-  if (value.length > MAX_BASE64_CHARS || value.length % 4 !== 0) return false;
+  // Length is a size question, not a format one, and is checked separately so an oversize payload
+  // is not reported as malformed base64. See the 413 below.
+  if (isOversizeBase64(value) || value.length % 4 !== 0) return false;
   // Sampled rather than matched whole, to keep the check cheap on multi-MB strings.
   return B64_RE.test(value.slice(0, 256)) && B64_RE.test(value.slice(-256));
+}
+
+/** True when the payload is over the base64 ceiling. Split out so it can be answered with a 413. */
+export function isOversizeBase64(value: string): boolean {
+  return value.length > MAX_BASE64_CHARS;
 }
 
 /** Only ever hand the client a URL on our own storefront. */
@@ -470,7 +491,9 @@ async function createAndPublish(
   const upload = await printifyFetch<{ id: string }>(env, '/uploads/images.json', {
     method: 'POST',
     body: JSON.stringify({
-      file_name: `citylines-${opts.tag.replace(/^cl-/, '')}.png`,
+      // Matches the JPEG the client now sends (generatePrintArtworkBase64). Measured against the
+      // live API: a mismatched extension is accepted, so this is hygiene, not a fix.
+      file_name: `citylines-${opts.tag.replace(/^cl-/, '')}.jpg`,
       contents: opts.imageBase64,
     }),
   });
@@ -581,6 +604,13 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   const city = (body.city_name ?? '').trim();
   if (!CITY_RE.test(city)) {
     send(env, req, res, { error: 'city_name is required (letters, numbers and spaces, max 60)' }, 400);
+    return;
+  }
+  // A body can arrive under the content-length cap but still carry an over-length payload when the
+  // request was chunked. Answer that as a size failure rather than as malformed base64, so the
+  // client can tell "too big" from "corrupt".
+  if (body.image_base64 && isOversizeBase64(body.image_base64)) {
+    send(env, req, res, { error: 'payload_too_large' }, 413);
     return;
   }
   if (!body.image_base64 || !isPlausibleBase64(body.image_base64)) {
