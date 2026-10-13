@@ -60,6 +60,8 @@ export type Database = {
           creator_name: string
           creator_email: string | null
           is_published: boolean
+          watermark_payload: string | null
+          watermark_version: number | null
         }
         Insert: {
           id?: string
@@ -71,6 +73,8 @@ export type Database = {
           creator_name?: string
           creator_email?: string | null
           is_published?: boolean
+          watermark_payload?: string | null
+          watermark_version?: number | null
         }
         Update: {
           id?: string
@@ -82,6 +86,8 @@ export type Database = {
           creator_name?: string
           creator_email?: string | null
           is_published?: boolean
+          watermark_payload?: string | null
+          watermark_version?: number | null
         }
         Relationships: [
           {

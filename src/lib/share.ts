@@ -1,5 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { generateArtworkBase64 } from "./download";
+import { buildWatermarkPayload } from "./watermarkBrowser";
+import { bytesToBase64 } from "./pngText";
 
 interface ShareResult {
   id: string;
@@ -15,8 +17,11 @@ export async function createShare(
   creatorName: string,
   creatorEmail: string | null
 ): Promise<ShareResult> {
-  // 1. Generate PNG in base64 at 3x scale (optimal for storage and upload payload size)
+  // 1. Generate PNG in base64 at 3x scale (optimal for storage and upload payload size).
+  //    The artwork is watermarked during rasterisation; the same payload is sent alongside so the
+  //    row keeps a copy that survives the pixels being stripped or re-encoded.
   const base64 = await generateArtworkBase64(svgElement, 3);
+  const watermark_payload = bytesToBase64(await buildWatermarkPayload());
 
   // 2. Invoke our Supabase Edge Function
   const { data, error } = await supabase.functions.invoke("create-share", {
@@ -26,7 +31,8 @@ export async function createShare(
       settings,
       user_id: userId,
       creator_name: creatorName,
-      creator_email: creatorEmail
+      creator_email: creatorEmail,
+      watermark_payload,
     },
   });
 

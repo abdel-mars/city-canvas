@@ -4,6 +4,59 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const MAX_BASE64_CHARS = 2_500_000; // ~1.8 MB decoded
 const CITY_RE = /^[\p{L}\p{N}][\p{L}\p{N} .,'’-]{0,59}$/u;
 
+/** Mirrors MARS_DOMAIN in src/lib/watermark.ts. Kept literal so this file stays dependency-free. */
+const WATERMARK_DOMAIN = "mars.42web.io";
+const WATERMARK_VERSION = 1;
+const WATERMARK_BYTES = 32;
+const WATERMARK_USER_OFFSET = 14;
+
+/**
+ * Validate a provenance payload supplied by the client.
+ *
+ * The body is not trusted for anything that matters, and this is no exception: the payload is
+ * accepted only if its version, its embedded domain and the UUID it carries all agree with the
+ * user the token actually authenticated. Otherwise a caller could attach a share to their own
+ * account while embedding somebody else's id in the artwork, which would poison the very record
+ * this table is meant to keep.
+ *
+ * Returns the payload as bytes, or null when it is absent or inconsistent.
+ */
+function validateWatermark(base64: unknown, userId: string): Uint8Array | null {
+  if (typeof base64 !== "string" || base64.length === 0) return null;
+
+  let binary: string;
+  try {
+    binary = atob(base64);
+  } catch {
+    return null;
+  }
+  if (binary.length !== WATERMARK_BYTES) return null;
+
+  const payload = new Uint8Array(WATERMARK_BYTES);
+  for (let i = 0; i < WATERMARK_BYTES; i++) payload[i] = binary.charCodeAt(i);
+
+  if (payload[0] !== WATERMARK_VERSION) return null;
+
+  let domain = "";
+  for (let i = 0; i < WATERMARK_DOMAIN.length; i++) {
+    domain += String.fromCharCode(payload[1 + i]);
+  }
+  if (domain !== WATERMARK_DOMAIN) return null;
+
+  // The embedded UUID must be the authenticated user's, byte for byte. A zeroed field means the
+  // export was anonymous, which is allowed: attribution to the origin is still worth recording.
+  let hex = "";
+  let anonymous = true;
+  for (let i = 0; i < 16; i++) {
+    const byte = payload[WATERMARK_USER_OFFSET + i];
+    hex += byte.toString(16).padStart(2, "0");
+    if (byte !== 0) anonymous = false;
+  }
+  if (!anonymous && hex !== userId.replace(/-/g, "").toLowerCase()) return null;
+
+  return payload;
+}
+
 /** Locked to the deployed site. Never a wildcard. */
 function corsHeaders(req: Request) {
   const allowed = Deno.env.get("APP_ORIGIN");
@@ -25,6 +78,11 @@ function json(req: Request, body: unknown, status: number) {
     status,
     headers: { ...corsHeaders(req), "Content-Type": "application/json" },
   });
+}
+
+/** bytea arrives as a `\x`-prefixed hex string; strip the prefix for the column value. */
+function bytesToHex(bytes: Uint8Array): string {
+  return "\\x" + Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 serve(async (req) => {
@@ -94,7 +152,10 @@ serve(async (req) => {
     const image_url = urlData.publicUrl;
 
     // 5. Insert. user_id and creator_email are derived from the verified token, so a caller
-    //    cannot attach a share to someone else's account.
+    //    cannot attach a share to someone else's account. The watermark payload is checked against
+    //    that same identity for the same reason.
+    const watermark_payload = validateWatermark(body?.watermark_payload, user.id);
+
     const { data: shareData, error: insertError } = await supabase
       .from("shares")
       .insert({
@@ -104,6 +165,8 @@ serve(async (req) => {
         user_id: user.id,
         creator_name,
         creator_email: user.email ?? null,
+        watermark_payload: watermark_payload ? bytesToHex(watermark_payload) : null,
+        watermark_version: watermark_payload ? WATERMARK_VERSION : null,
       })
       .select("id")
       .single();

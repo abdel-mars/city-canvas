@@ -1,4 +1,7 @@
 import logoUrl from '@/assets/casanobg.png';
+import { MARS_DOMAIN, MARS_URL } from '@/lib/watermark';
+import { base64ToBytes, bytesToBase64, insertPngText } from '@/lib/pngText';
+import { stampWatermark } from '@/lib/watermarkBrowser';
 
 /** Shared helper: clone SVG, optionally strip background rect, return {img, url, width, height} */
 async function prepareSvgImage(
@@ -37,67 +40,125 @@ async function prepareSvgImage(
   });
 }
 
+interface Raster {
+  canvas: HTMLCanvasElement;
+  ctx: CanvasRenderingContext2D;
+  width: number;
+  height: number;
+  /** Release the SVG blob backing this raster. */
+  dispose(): void;
+}
+
+/**
+ * Rasterise the SVG onto a canvas.
+ *
+ * All five export paths used to repeat this block, which meant any post-processing step had to be
+ * added five times and would silently drift between them. They share this instead, so the
+ * watermark below has exactly one place to live.
+ */
+async function rasterize(
+  svgElement: SVGSVGElement,
+  scale: number,
+  transparent: boolean,
+): Promise<Raster> {
+  const { img, url, width, height } = await prepareSvgImage(svgElement, scale, transparent);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(img, 0, 0, width, height);
+
+  return { canvas, ctx, width, height, dispose: () => URL.revokeObjectURL(url) };
+}
+
+/** Pre-load the logo used by the visible watermark. */
+async function loadLogo(): Promise<HTMLImageElement | null> {
+  const logoImg = new Image();
+  logoImg.crossOrigin = 'anonymous';
+  logoImg.src = logoUrl;
+  await new Promise<void>((resolve) => {
+    logoImg!.onload = () => resolve();
+    logoImg!.onerror = () => resolve();
+  });
+  return logoImg.naturalWidth > 0 ? logoImg : null;
+}
+
 export async function downloadArtwork(
   svgElement: SVGSVGElement,
   filename: string,
-  _textColor: string = '#999999',
+  textColor: string = '#999999',
   scale: number = 3,
   watermark: boolean = true,
 ): Promise<void> {
-  const { img, url, width, height } = await prepareSvgImage(svgElement, scale, false);
+  const { canvas, ctx, width, height, dispose } = await rasterize(svgElement, scale, false);
 
-  // Pre-load logo for watermark
-  let logoImg: HTMLImageElement | null = null;
-  if (watermark) {
-    logoImg = new Image();
-    logoImg.crossOrigin = 'anonymous';
-    logoImg.src = logoUrl;
-    await new Promise<void>((resolve) => {
-      logoImg!.onload = () => resolve();
-      logoImg!.onerror = () => resolve();
-    });
-  }
-
-  return new Promise((resolve, reject) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(img, 0, 0, width, height);
-
+  try {
     // Draw logo watermark
-    if (watermark && logoImg && logoImg.naturalWidth > 0) {
-      const logoH = 30 * scale * 0.4;
-      const logoW = (logoImg.naturalWidth / logoImg.naturalHeight) * logoH;
-      ctx.globalAlpha = 0.3;
-      ctx.drawImage(
-        logoImg,
-        width - logoW - 15 * scale * 0.4,
-        height - logoH - 15 * scale * 0.4,
-        logoW,
-        logoH,
-      );
-      ctx.globalAlpha = 1;
+    if (watermark) {
+      const logoImg = await loadLogo();
+      if (logoImg) {
+        const logoH = 30 * scale * 0.4;
+        const logoW = (logoImg.naturalWidth / logoImg.naturalHeight) * logoH;
+        ctx.globalAlpha = 0.3;
+        ctx.drawImage(
+          logoImg,
+          width - logoW - 15 * scale * 0.4,
+          height - logoH - 15 * scale * 0.4,
+          logoW,
+          logoH,
+        );
+        ctx.globalAlpha = 1;
+      }
+      drawCreditLine(ctx, width, height, scale, textColor);
     }
 
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) { reject(new Error('Failed to create image')); return; }
-        const downloadUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = `${filename}.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(downloadUrl);
-        URL.revokeObjectURL(url);
-        resolve();
-      },
-      'image/png',
-      1.0,
-    );
-  });
+    // Last, so it lands on top of the logo rather than underneath it.
+    await stampWatermark(ctx, width, height);
+
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('Failed to create image'))),
+        'image/png',
+        1.0,
+      );
+    });
+
+    const downloadUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = `${filename}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(downloadUrl);
+  } finally {
+    dispose();
+  }
+}
+
+/**
+ * A near-invisible credit line.
+ *
+ * The pixel watermark is invisible but fragile; this survives JPEG and screenshots, which are
+ * exactly the cases it cannot cover. At 0.08 alpha it reads as a faint smudge if you look for it on
+ * a calibrated display at full zoom and is invisible at any normal viewing size.
+ */
+function drawCreditLine(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  scale: number,
+  textColor: string,
+): void {
+  const pad = 15 * scale * 0.4;
+  ctx.save();
+  ctx.globalAlpha = 0.08;
+  ctx.fillStyle = textColor;
+  ctx.textBaseline = 'alphabetic';
+  ctx.font = `${Math.round(11 * scale * 0.4)}px ui-sans-serif, system-ui, sans-serif`;
+  ctx.fillText(MARS_DOMAIN, pad, height - pad);
+  ctx.restore();
 }
 
 /** Download a transparent PNG — background rect is removed */
@@ -106,34 +167,33 @@ export async function downloadArtworkTransparent(
   filename: string,
   scale: number = 3,
 ): Promise<void> {
-  const { img, url, width, height } = await prepareSvgImage(svgElement, scale, true);
+  const { canvas, ctx, width, height, dispose } = await rasterize(svgElement, scale, true);
 
-  return new Promise((resolve, reject) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d')!;
-    // No fillRect — canvas is transparent by default
-    ctx.drawImage(img, 0, 0, width, height);
+  try {
+    // The background is fully transparent here, so its RGB is meaningless. The alpha channel is
+    // the only place a bit can live: 0 versus 1 is invisible and, unlike RGB, survives the PNG
+    // round trip intact.
+    await stampWatermark(ctx, width, height, 'alpha');
 
-    canvas.toBlob(
-      (blob) => {
-        if (!blob) { reject(new Error('Failed to create image')); return; }
-        const downloadUrl = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = `${filename}-transparent.png`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(downloadUrl);
-        URL.revokeObjectURL(url);
-        resolve();
-      },
-      'image/png',
-      1.0,
-    );
-  });
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('Failed to create image'))),
+        'image/png',
+        1.0,
+      );
+    });
+
+    const downloadUrl = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.download = `${filename}-transparent.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(downloadUrl);
+  } finally {
+    dispose();
+  }
 }
 
 /** Copy artwork PNG to clipboard */
@@ -141,32 +201,24 @@ export async function copyArtworkToClipboard(
   svgElement: SVGSVGElement,
   scale: number = 3,
 ): Promise<void> {
-  const { img, url, width, height } = await prepareSvgImage(svgElement, scale, false);
+  const { ctx, width, height, dispose } = await rasterize(svgElement, scale, false);
 
-  return new Promise((resolve, reject) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(img, 0, 0, width, height);
+  try {
+    await stampWatermark(ctx, width, height);
 
-    canvas.toBlob(
-      async (blob) => {
-        if (!blob) { reject(new Error('Failed to create image')); return; }
-        try {
-          await navigator.clipboard.write([
-            new ClipboardItem({ 'image/png': blob }),
-          ]);
-          URL.revokeObjectURL(url);
-          resolve();
-        } catch (e) {
-          reject(e);
-        }
-      },
-      'image/png',
-      1.0,
-    );
-  });
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      canvasToBlob(ctx.canvas, (b) => (b ? resolve(b) : reject(new Error('Failed to create image'))));
+    });
+
+    await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+  } finally {
+    dispose();
+  }
+}
+
+/** Small wrapper so every path reports the same failure when encoding fails. */
+function canvasToBlob(canvas: HTMLCanvasElement, done: (blob: Blob | null) => void): void {
+  canvas.toBlob(done, 'image/png', 1.0);
 }
 
 /** Generate a base64 PNG from the SVG. Lossless; used for the gallery, where fidelity is the point. */
@@ -174,21 +226,18 @@ export async function generateArtworkBase64(
   svgElement: SVGSVGElement,
   scale: number = 5,
 ): Promise<string> {
-  const { img, url, width, height } = await prepareSvgImage(svgElement, scale, false);
+  const { canvas, ctx, width, height, dispose } = await rasterize(svgElement, scale, false);
 
-  return new Promise((resolve, reject) => {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(img, 0, 0, width, height);
+  try {
+    await stampWatermark(ctx, width, height);
 
     const dataUrl = canvas.toDataURL('image/png', 1.0);
-    const base64 = dataUrl.split(',')[1];
-    URL.revokeObjectURL(url);
-    resolve(base64);
-    void reject; // suppress unused warning
-  });
+    // The tEXt comment costs nothing visually and survives the file being re-shared untouched,
+    // covering the case where the pixel layer has been stripped or re-encoded.
+    return bytesToBase64(insertPngText(base64ToBytes(dataUrl.split(',')[1]), 'Comment', MARS_URL));
+  } finally {
+    dispose();
+  }
 }
 
 /**
@@ -201,6 +250,11 @@ const PRINT_JPEG_QUALITY = 0.92;
 
 /**
  * Base64 JPEG of the artwork, for the Printify upload.
+ *
+ * Deliberately not watermarked. The pixel watermark lives in the least significant bit, and JPEG's
+ * DCT quantisation discards exactly those bits, so stamping here would be theatre that silently
+ * fails on every print. A poster bought and printed is also a terminal act rather than something
+ * that circulates as a file, which is where attribution would matter.
  *
  * JPEG rather than PNG because size here is a hard constraint, not a nicety: the endpoint caps the
  * request body (MAX_BODY_BYTES) and Vercel rejects anything over 4.5 MB before our code runs. PNG
@@ -217,18 +271,12 @@ export async function generatePrintArtworkBase64(
   svgElement: SVGSVGElement,
   scale: number = 5,
 ): Promise<string> {
-  const { img, url, width, height } = await prepareSvgImage(svgElement, scale, false);
+  const { canvas, dispose } = await rasterize(svgElement, scale, false);
 
   try {
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(img, 0, 0, width, height);
-
     return canvas.toDataURL('image/jpeg', PRINT_JPEG_QUALITY).split(',')[1];
   } finally {
-    URL.revokeObjectURL(url);
+    dispose();
   }
 }
 
