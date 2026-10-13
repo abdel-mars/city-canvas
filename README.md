@@ -50,17 +50,29 @@ git clone https://github.com/abdel-mars/city-canvas.git
 cd city-canvas
 npm install
 cp .env.example .env      # then fill in GEOCONTACT at minimum
-npm run dev               # http://localhost:8080
+npm run dev               # http://localhost:3000
 ```
+
+`GEOCONTACT` must be your own email or URL. It is sent as the `User-Agent` to OpenStreetMap's
+Nominatim and Overpass, which permanently ban clients that do not identify themselves, so the
+proxy refuses to call them without it and `npm run dev` will not start.
 
 The artwork editor works with nothing but `GEOCONTACT` set. Everything else — caching,
 printing, accounts — is optional and degrades gracefully.
 
 | Script | What it does |
 | --- | --- |
-| `npm run dev` | Dev server on port 8080 |
+| `npm run dev` | Full stack via `vercel dev` on **port 3000** — app **and** the `api/` functions (city search, road loading) |
+| `npm run dev:ui` | Vite alone, port 8080. Faster, for pure UI work. **The API does not run**, so city search will not work |
 | `npm run build` | Production build into `dist/` |
 | `npm run preview` | Serve the production build locally |
+
+`npm run dev` uses `vercel dev` under the hood, because `api/` holds Vercel serverless functions
+that the plain Vite server cannot execute. `dev:full` remains as an alias for `dev`.
+
+`npm run dev` also needs `redis.txt` and `token-printify.txt` in the project root (both
+gitignored). Without them the Upstash cache and the paid Printify calls are unavailable; use
+`dev:ui` if you do not have them.
 | `npm test` | Run the test suite (Vitest) |
 | `npm run lint` | Lint with ESLint |
 
@@ -198,6 +210,12 @@ npx vercel
 
 `vercel.json` handles the SPA rewrite for client-side routes while leaving `/api/*` alone.
 
+The rewrite excludes `src/`, `@vite`, `@react-refresh` and `node_modules/`. Those are dev-server
+internals that exist only under `vercel dev`, and Vercel applies rewrites ahead of the dev-server
+proxy — an unexcluded catch-all answers those paths itself and returns 404 for every module
+script, so the app never mounts in a browser. Nothing user-facing starts with those prefixes, so
+deployed behaviour is unchanged.
+
 To deploy anywhere else, build with `npm run build` and serve `dist/` as a static site, and
 deploy `api/` as Node 20+ serverless functions. Remember to set `GEOCONTACT` and `APP_ORIGIN`.
 
@@ -205,10 +223,12 @@ deploy `api/` as Node 20+ serverless functions. Remember to set `GEOCONTACT` and
 
 | Symptom | Cause |
 | --- | --- |
+| City search returns nothing, dropdown stays blank | You started `npm run dev:ui`. Vite alone cannot execute the `api/` functions, so `/api/geo` is unrouted. Use `npm run dev`. The UI now says so explicitly. |
+| *"City search is not configured. Set GEOCONTACT in .env and restart."* | `GEOCONTACT` is unset. The proxy returns `503 unconfigured` rather than calling OpenStreetMap unidentified. |
 | *"blocked by CORS policy"* on the Overpass URL | Misleading. The real status is `406`: something is calling Overpass from a browser. Route it through `/api/geo`. |
 | Road data never loads, endpoint returns `503` | `GEOCONTACT` or the Redis credentials are missing. The proxy fails closed rather than hammer the upstream unidentified. |
 | `"Printing is unavailable"` | `PRINTIFY_API_KEY` or `PRINTIFY_SHOP_ID` is unset. |
-| Searches return `429` | 60 requests/hour per IP. Past the cap the proxy serves a stale cached copy when it has one. |
+| Searches return `429` | 60 requests/hour per IP, shared between search and road loading. Past the cap the proxy serves a stale cached copy when it has one. |
 | Large cities come back empty | The bounding box exceeded `MAX_BBOX_SPAN`. Nominatim returns administrative areas, which can be much bigger than the city. |
 
 ## Support the project

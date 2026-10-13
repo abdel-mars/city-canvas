@@ -593,3 +593,103 @@ describe('geo endpoint', () => {
     });
   });
 });
+
+describe('geo endpoint: search', () => {
+  function mockFetch(handler: (url: string) => Response) {
+    const mock = vi.fn(async (input: RequestInfo | URL) => handler(String(input)));
+    vi.stubGlobal('fetch', mock);
+    return mock;
+  }
+
+  /** One Nominatim hit shaped like a real city. */
+  const lisbonHit = [
+    {
+      name: 'Lisbon',
+      display_name: 'Lisbon, Portugal',
+      lat: '38.7077',
+      lon: '-9.1366',
+      boundingbox: ['38.68', '-9.24', '38.81', '-9.07'],
+    },
+  ];
+
+  beforeEach(() => {
+    mockFetch(() => new Response('blocked by test default', { status: 503 }));
+  });
+
+  it('returns mapped cities', async () => {
+    mockFetch(() =>
+      new Response(JSON.stringify(lisbonHit), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const res = await call(geoHandler, { kind: 'search', q: 'lisbon' });
+    expect(res.status).toBe(200);
+    const cities = (res.body as { cities: { name: string }[] }).cities;
+    expect(cities).toHaveLength(1);
+    expect(cities[0].name).toBe('Lisbon');
+  });
+
+  it('rejects a query shorter than two characters without any network call', async () => {
+    const mock = mockFetch(() => new Response('[]', { status: 200 }));
+    const res = await call(geoHandler, { kind: 'search', q: 'a' });
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: 'invalid_query' });
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The regression this guards: an empty result was cached unconditionally for 30 days, so one
+   * bad upstream hour made a city permanently unfindable. The roads handler refuses to cache
+   * empties for the same reason.
+   */
+  it('does not cache an empty result set', async () => {
+    let calls = 0;
+    mockFetch(() => {
+      calls++;
+      return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+
+    const first = await call(geoHandler, { kind: 'search', q: 'atlantis' });
+    expect(first.status).toBe(200);
+    expect((first.body as { cities: unknown[] }).cities).toEqual([]);
+    expect(calls).toBe(1);
+
+    // A second lookup must retry upstream rather than replay a cached empty list.
+    const second = await call(geoHandler, { kind: 'search', q: 'atlantis' });
+    expect(second.status).toBe(200);
+    expect(calls).toBe(2);
+  });
+
+  it('caches a non-empty result set, so the second lookup skips upstream', async () => {
+    let calls = 0;
+    mockFetch(() => {
+      calls++;
+      return new Response(JSON.stringify(lisbonHit), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    await call(geoHandler, { kind: 'search', q: 'porto' });
+    const second = await call(geoHandler, { kind: 'search', q: 'Porto' });
+    expect(calls).toBe(1);
+    expect((second.body as { cached: boolean }).cached).toBe(true);
+  });
+
+  it('reports an unconfigured contact distinctly from an upstream outage', async () => {
+    delete process.env.GEOCONTACT;
+    const mock = mockFetch(() => new Response('[]', { status: 200 }));
+    const res = await call(geoHandler, { kind: 'search', q: 'unconfigured-check' });
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: 'unconfigured' });
+    expect(mock).not.toHaveBeenCalled();
+  });
+
+  it('reports an upstream failure as upstream_unavailable', async () => {
+    mockFetch(() => new Response('nope', { status: 500 }));
+    const res = await call(geoHandler, { kind: 'search', q: 'upstream-failure' });
+    expect(res.status).toBe(503);
+    expect(res.body).toEqual({ error: 'upstream_unavailable' });
+  });
+});

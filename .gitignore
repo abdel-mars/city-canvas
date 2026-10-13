@@ -21,9 +21,10 @@ redis.txt
 token-printify.txt
 secrets*.txt
 *-secret*.txt
-# Reads the local secret files at runtime. Contains no secrets itself, but kept out of git so the
-# repo does not normalise credentials living in the project directory.
-scripts/dev-env.sh
+# One-shot harness against the live Printify and Upstash accounts, reading the credential files
+# above. Scratch tooling, and kept out of git so the repo does not normalise credentials living in
+# the project directory. scripts/dev-env.sh is the opposite case: it holds no secret, only paths to
+# the files above, and npm run dev depends on it, so it is tracked.
 scripts/probe-pricing.ts
 
 # Editor directories and files

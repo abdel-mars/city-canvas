@@ -641,7 +641,17 @@ async function handleSearch(
       const list = (Array.isArray(data) ? data : [])
         .map(toCity)
         .filter((c): c is City => c !== null && c.name.length > 0);
-      await cacheSet(key, list, SEARCH_FRESH_TTL, SEARCH_STALE_TTL);
+
+      // Nominatim answering with nothing is not the same as this city not existing. A transient
+      // failure, an upstream hiccup, or every hit being filtered out by toCity (a metro-sized
+      // bbox, say) all land here as an empty list, and caching that would pin the city to "no
+      // results" for 30 days fresh and 90 stale with nothing to retry against. The roads handler
+      // refuses to cache empties for the same reason, at line 585.
+      if (list.length > 0) {
+        await cacheSet(key, list, SEARCH_FRESH_TTL, SEARCH_STALE_TTL);
+      } else {
+        console.warn(`geo: no results for search "${q}"; not cached`);
+      }
       return list;
     });
     res.status(200).json({ cities, cached: false });
@@ -675,6 +685,17 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   }
 
   const ip = clientIp(req.headers);
+
+  // Fail with a distinct code before doing any work. Without this the missing contact surfaces
+  // as a generic `upstream_unavailable` from deep inside the try/catch, which is indistinguishable
+  // from Nominatim actually being down — and the browser cannot tell the visitor whether to wait
+  // or go fix their environment.
+  try {
+    userAgent();
+  } catch {
+    res.status(503).json({ error: 'unconfigured' });
+    return;
+  }
 
   if (body.kind === 'roads') {
     await handleRoads(res, body.bbox, ip);
