@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowUpRight, Loader2 } from 'lucide-react';
-import ArtworkCanvas from '@/components/ArtworkCanvas';
+import { MockupFrame } from '@/components/MockupFrame';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { decodeGiftParams } from '@/lib/giftParams';
 import { designHash } from '@/lib/designHash';
@@ -272,16 +272,15 @@ const GiftPage = () => {
         )}
 
         <motion.div {...fade(0.3)} className="gift-art mt-6 sm:mt-8 w-screen sm:w-auto">
-          <ArtworkCanvas
+          <MockupFrame
             ref={svgRef}
             city={city}
             roads={roads}
             bbox={bbox ?? undefined}
             settings={settings}
             isLoading={isLoading}
-            size="var(--gift-art-size)"
-            frame
             label={posterLabel}
+            className="flex items-center justify-center"
           />
         </motion.div>
 
