@@ -196,18 +196,17 @@ const Index = () => {
             className="min-h-screen flex flex-col lg:flex-row"
           >
             {/* Left column: header + artwork */}
-            <div className="flex-1 min-w-0 flex flex-col">
-              <header className="flex items-center justify-center gap-4 px-5 py-3.5 border-b border-border">
+            <div className="flex-1 min-w-0 flex flex-col relative">
+              <header className="absolute top-0 left-0 right-0 z-20 flex items-center justify-center gap-4 px-5 py-3.5 bg-transparent border-none pointer-events-none">
                 <button
                   onClick={() => setSelectedCity(null)}
-                  className="text-lg font-display tracking-tight text-foreground hover:opacity-60 transition-opacity duration-200 shrink-0"
+                  className="text-lg font-display tracking-tight text-foreground hover:opacity-60 transition-opacity duration-200 shrink-0 pointer-events-auto"
                 >
                   City Lines
                 </button>
-                <div className="flex-1 max-w-sm">
+                <div className="flex-1 max-w-sm pointer-events-auto">
                   <CitySearch onSelect={handleCitySelect} compact />
                 </div>
-                <ThemeToggle />
               </header>
 
               {/* Artwork area */}
@@ -272,6 +271,10 @@ const Index = () => {
 
             {/* Right panel: full height from top to bottom */}
             <aside className="lg:w-72 xl:w-80 border-t lg:border-t-0 lg:border-l border-border bg-card/40 overflow-y-auto overflow-x-hidden lg:h-screen">
+              <div className="flex items-center justify-end px-5 py-3.5 border-b border-border bg-card/40">
+                <ThemeToggle />
+              </div>
+
               {error && (
                 <div className="px-6 pt-6 hidden lg:block">
                   <p className="text-sm text-muted-foreground">{error}</p>
