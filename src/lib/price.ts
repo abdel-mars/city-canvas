@@ -6,7 +6,9 @@
  * would silently misprice the storefront.
  */
 export interface PosterVariant {
-  id: number;
+  id: string;
+  /** Frame colour for framed posters (Black, Red Oak); undefined for stickers. */
+  color?: string;
   /** Raw Printify variant title, e.g. `16″ x 16″ / Matte`. */
   title: string;
   /** Square side length in inches. The artwork is 1:1, so only square sizes are sold. */

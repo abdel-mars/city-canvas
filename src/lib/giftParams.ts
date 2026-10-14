@@ -70,6 +70,7 @@ export function encodeGiftParams(city: City, settings: ArtworkSettings): URLSear
   const params = new URLSearchParams();
   params.set('city', city.name);
   params.set('display', city.displayName);
+  if (city.country) params.set('country', city.country);
   params.set('lat', String(city.lat));
   params.set('lon', String(city.lon));
   params.set('bbox', city.boundingBox.join(','));
@@ -124,6 +125,12 @@ export function decodeGiftParams(input: URLSearchParams | string): GiftDecodeOut
   }
 
   const displayName = (params.get('display') ?? '').trim();
+  const countryParam = (params.get('country') ?? '').trim();
+  let country = countryParam;
+  if (!country) {
+    const parts = displayName.split(',').map((x) => x.trim()).filter(Boolean);
+    if (parts.length >= 2) country = parts[parts.length - 1];
+  }
   const customName = params.get('name') ?? '';
   const showCustomName = params.get('show') === '1';
 
@@ -131,6 +138,7 @@ export function decodeGiftParams(input: URLSearchParams | string): GiftDecodeOut
     name,
     // A missing displayName is cosmetic, so fall back rather than reject the whole link.
     displayName: displayName || name,
+    country,
     lat,
     lon,
     boundingBox: [south, west, north, east],

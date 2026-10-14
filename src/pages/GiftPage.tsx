@@ -257,7 +257,7 @@ const GiftPage = () => {
           {...fade(0.15)}
           className="text-[10px] sm:text-[11px] uppercase tracking-[0.2em] font-medium text-muted-foreground"
         >
-          A City Lines Art poster
+          A City Lines Art framed poster
         </motion.p>
 
         {geoError && (
@@ -290,7 +290,7 @@ const GiftPage = () => {
         </motion.h1>
 
         <motion.p {...fade(0.6)} className="mt-2 text-sm sm:text-[15px] text-muted-foreground">
-          {settings.preset.name} · Matte poster paper
+          {settings.preset.name} · Framed matte poster · Black or Red Oak frame, chosen on Fourthwall
         </motion.p>
 
         <motion.div {...fade(0.75)} className="mt-10 sm:mt-16 w-full max-w-3xl">

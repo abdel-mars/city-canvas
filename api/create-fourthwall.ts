@@ -11,15 +11,20 @@ const LIMITS = {
   createsPerDayPerIp: 30,
   createsPerDayGlobal: 200,
 };
-const FLAT_MARGIN_USD = 12;
 
 const CITY_RE = /^[\p{L}\p{N}][\p{L}\p{N} .,'’-]{0,59}$/u;
 const B64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
 const IP_RE = /^[0-9a-f:.]{3,45}$/i;
 const HASH_RE = /^[a-f0-9]{8,16}$/;
 
-const TEMPLATE_ID = (process.env.FOURTHWALL_TEMPLATE_ID ?? 'pro_15bc29bc8a324d449d').trim();
-const SQUARE_SIZES = ['12" x 12"', '16" x 16"', '18" x 18"'];
+const POSTER_TEMPLATE_ID = (process.env.FOURTHWALL_TEMPLATE_ID ?? 'pro_kRSsoYjwSoyyTEmWko5o0A').trim();
+const STICKER_TEMPLATE_ID = (process.env.FOURTHWALL_STICKER_TEMPLATE_ID ?? 'pro_358').trim();
+const POSTER_MARGIN_USD = 12;
+const STICKER_MARGIN_USD = 6;
+const POSTER_COLORS = ['Black', 'Red Oak'];
+const STICKER_COLORS = ['White'];
+const POSTER_SIZES = ['10" x 10"', '14" x 14"', '18" x 18"'];
+const STICKER_SIZES = ['3" x 3"', '4" x 4"', '5.5" x 5.5"'];
 
 export interface ApiRequest {
   method?: string;
@@ -202,13 +207,11 @@ function jpegDimensions(buf: Buffer): { width: number; height: number } | null {
   return null;
 }
 
-// ── Fourthwall calls ──────────────────────────────────────────────────────────
-
 interface UploadUrlResponse { uploadUrl: string; fileUrl: string }
 interface MediaImageResponse { id: string; uri?: string }
-interface CreateProductResponse { productId: string; customizationId?: string; images?: { url: string; width: number; height: number }[] }
+interface CreateProductResponse { productId: string; customizationId?: string; images?: unknown[] }
 interface ProductDetail { id: string; slug: string; name?: string; variants?: { id: string; name: string; unitPrice?: { value: number; currency: string } }[] }
-interface CreatedProduct { productId: string; slug: string; variants: { id: string; title: string; inches: number; priceCents: number }[] }
+interface CreatedProduct { productId: string; slug: string; variants: { id: string; title: string; inches: number; priceCents: number; color?: string }[] }
 
 async function uploadImage(env: Env, imageBase64: string, size: number, dims: { width: number; height: number }) {
   const meta = await fwFetch<UploadUrlResponse>(env, '/open-api/v1.0/media/upload-url', {
@@ -235,18 +238,64 @@ async function uploadImage(env: Env, imageBase64: string, size: number, dims: { 
   return saved.id;
 }
 
-async function createProduct(env: Env, opts: { imageId: string; city: string; designHash: string }): Promise<CreatedProduct> {
+function esc(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+interface ProductSpec {
+  templateId: string;
+  colors: string[];
+  sizes: string[];
+  profitMargin: number;
+  kind: 'poster' | 'sticker';
+  city: string;
+  country: string;
+  designHash: string;
+}
+
+function productTitle(spec: ProductSpec): string {
+  const city = esc(spec.city);
+  const country = esc(spec.country);
+  const kind = spec.kind === 'poster' ? 'City Lines Art Framed Poster' : 'City Lines Art Sticker';
+  if (country) return `${city} | ${country} | ${kind}`;
+  return `${city} | ${kind}`;
+}
+
+function productDescription(spec: ProductSpec): string {
+  const city = esc(spec.city);
+  const country = esc(spec.country) || city;
+  const token = `<!-- citylines:${spec.designHash} -->`;
+  if (spec.kind === 'poster') {
+    return [
+      `<p><strong>${city}</strong>, drawn through its streets.</p>`,
+      `<p>A study of the city's urban rhythm, where intersecting roads, geometric patterns, and the movement of everyday life form a map of modern ${country}.</p>`,
+      `<p>Part of <em>City Lines</em>, a visual collection exploring the identity of cities around the world through minimalist line art.</p>`,
+      `<p>One city. Countless lines. A place worth framing.</p>`,
+      token,
+    ].join('\n');
+  }
+  return [
+    `<p><strong>${city}</strong>, drawn through its streets.</p>`,
+    `<p>A study of the city's urban rhythm, transformed into minimalist line art designed for stickers. Intersecting roads, geometric patterns, and the movement of everyday life become a unique visual representation of ${city}, ready to accompany you wherever you go.</p>`,
+    `<p>Part of <em>City Lines</em>, a visual collection exploring the identity of cities around the world through minimalist line art.</p>`,
+    `<p>One city. Countless lines. Take your city with you.</p>`,
+    token,
+  ].join('\n');
+}
+
+async function createDesignProduct(env: Env, imageId: string, spec: ProductSpec): Promise<CreatedProduct> {
   const created = await fwFetch<CreateProductResponse>(env, '/open-api/v1.0/products', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       type: 'design',
-      productTemplateId: TEMPLATE_ID,
-      name: `${opts.city} — City Lines Art Poster (${opts.designHash})`,
-      description: `City Lines road-network artwork of ${opts.city}.`,
-      regions: [{ region: 'default', imageId: opts.imageId, placementStrategy: 'AUTO' }],
-      sizes: SQUARE_SIZES,
-      profitMargin: FLAT_MARGIN_USD,
+      productTemplateId: spec.templateId,
+      name: productTitle(spec),
+      description: productDescription(spec),
+      regions: [{ region: 'default', imageId, placementStrategy: 'AUTO' }],
+      colors: spec.colors,
+      sizes: spec.sizes,
+      profitMargin: spec.profitMargin,
       publishOnCreate: true,
     }),
   });
@@ -259,53 +308,53 @@ async function createProduct(env: Env, opts: { imageId: string; city: string; de
     const w = m ? Number(m[1]) : 0;
     const h = m ? Number(m[2]) : 0;
     const inches = w === h ? w : 0;
+    const color = spec.colors.find((c) => (v.name ?? '').toLowerCase().includes(c.toLowerCase()));
     const priceCents = Math.round((v.unitPrice?.value ?? 0) * 100);
-    return { id: v.id, title: v.name ?? '', inches, priceCents };
+    return { id: v.id, title: v.name ?? '', inches, color, priceCents };
   }).filter((v) => v.inches > 0);
   return { productId: created.productId, slug: detail.slug, variants };
 }
-
 
 function productUrl(env: Env, slug: string) {
   const domain = env.FOURTHWALL_SHOP_DOMAIN.replace(/^https?:\/\//, '').replace(/\/+$/, '');
   return `https://${domain}/products/${slug}`;
 }
 
-const DESIGN_KEY = (hash: string) => `fw:design:${hash}`;
-const MEMO_TTL_MS = 30_000;
 const memo = new Map<string, { at: number; value: { productId: string; slug: string } }>();
+const MEMO_TTL_MS = 30_000;
 
-async function resolveExisting(env: Env, hash: string): Promise<{ productId: string; slug: string } | null> {
-  const cached = memo.get(hash);
+async function resolveExisting(env: Env, hash: string, type: 'poster' | 'sticker'): Promise<{ productId: string; slug: string } | null> {
+  const cached = memo.get(`${type}:${hash}`);
   if (cached && Date.now() - cached.at < MEMO_TTL_MS) return cached.value;
 
   const url = env.UPSTASH_REDIS_REST_URL!;
   const token = env.UPSTASH_REDIS_REST_TOKEN!;
-  const r = await redisPipeline(url, token, [['GET', DESIGN_KEY(hash)]]);
+  const key = `fw:design:${type}:${hash}`;
+  const r = await redisPipeline(url, token, [['GET', key]]);
   if (typeof r[0] === 'string') {
     try {
       const parsed = JSON.parse(r[0]) as { productId?: string; slug?: string };
       if (parsed.productId && parsed.slug) {
         const v = { productId: parsed.productId, slug: parsed.slug };
-        memo.set(hash, { at: Date.now(), value: v });
+        memo.set(`${type}:${hash}`, { at: Date.now(), value: v });
         return v;
       }
     } catch { /* fall through */ }
   }
 
-  // fallback scan
+  const marker = type === 'poster' ? 'Framed Poster' : 'Stickers';
   for (let page = 0; page < 5; page++) {
     try {
-      const body = await fwFetch<{ results?: { id: string; name?: string; slug?: string }[]; total?: number }>(
+      const body = await fwFetch<{ results?: { id: string; name?: string; slug?: string }[] }>(
         env,
         `/open-api/v1.0/products?page=${page}&size=100`,
       );
       for (const p of body.results ?? []) {
-        if (p.name && p.name.includes(hash)) {
+        if (p.name && p.name.includes(marker) && p.name.includes(hash)) {
           if (p.slug) {
             const v = { productId: p.id, slug: p.slug };
-            await redisPipeline(url, token, [['SET', DESIGN_KEY(hash), JSON.stringify(v), 'EX', DAY * 90]]);
-            memo.set(hash, { at: Date.now(), value: v });
+            try { await redisPipeline(url, token, [['SET', key, JSON.stringify(v), 'EX', DAY * 90]]); } catch { /* ignore */ }
+            memo.set(`${type}:${hash}`, { at: Date.now(), value: v });
             return v;
           }
         }
@@ -316,13 +365,12 @@ async function resolveExisting(env: Env, hash: string): Promise<{ productId: str
   return null;
 }
 
-async function persistDesign(env: Env, hash: string, value: { productId: string; slug: string }) {
+async function persistDesign(env: Env, hash: string, type: 'poster' | 'sticker', value: { productId: string; slug: string }) {
   const url = env.UPSTASH_REDIS_REST_URL!;
   const token = env.UPSTASH_REDIS_REST_TOKEN!;
-  try {
-    await redisPipeline(url, token, [['SET', DESIGN_KEY(hash), JSON.stringify(value), 'EX', DAY * 90]]);
-  } catch { /* non-fatal */ }
-  memo.set(hash, { at: Date.now(), value });
+  const key = `fw:design:${type}:${hash}`;
+  try { await redisPipeline(url, token, [['SET', key, JSON.stringify(value), 'EX', DAY * 90]]); } catch { /* non-fatal */ }
+  memo.set(`${type}:${hash}`, { at: Date.now(), value });
 }
 
 export default async function handler(req: ApiRequest, res: ApiResponse): Promise<void> {
@@ -350,13 +398,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     return;
   }
 
-  // validate body
   const declared = Number(header(req.headers, 'content-length') ?? 0);
   if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
     send(env, req, res, { error: 'payload_too_large' }, 413);
     return;
   }
-  let body: { image_base64?: string; city_name?: string; design_hash?: string };
+  let body: { image_base64?: string; city_name?: string; city_country?: string; design_hash?: string };
   if (typeof req.body === 'string') {
     if (req.body.length > MAX_BODY_BYTES) { send(env, req, res, { error: 'payload_too_large' }, 413); return; }
     try { body = JSON.parse(req.body) as typeof body; } catch { send(env, req, res, { error: 'invalid_json' }, 400); return; }
@@ -373,6 +420,11 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   const city = (body.city_name ?? '').trim();
   if (!CITY_RE.test(city)) {
     send(env, req, res, { error: 'city_name is required (letters, numbers and spaces, max 60)' }, 400);
+    return;
+  }
+  const country = (body.city_country ?? '').trim();
+  if (country && !CITY_RE.test(country)) {
+    send(env, req, res, { error: 'city_country must be letters and spaces (max 60)' }, 400);
     return;
   }
   if (body.image_base64 && isOversizeBase64(body.image_base64)) {
@@ -394,42 +446,79 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     return;
   }
 
-  // dedupe: only a repeat click
   const hash = body.design_hash;
-  const existing = await resolveExisting(env, hash);
-  if (existing) {
-    // return known
-    send(env, req, res, {
-      product_url: productUrl(env, existing.slug),
-      product_id: existing.productId,
-      currency: 'USD',
-      reused: true,
-    }, 200);
-    return;
-  }
+  const existingPoster = await resolveExisting(env, hash, 'poster');
+  let poster: { productId: string; slug: string };
+  let needUpload = !existingPoster;
+  const existingSticker = await resolveExisting(env, hash, 'sticker');
 
-  // creations limited
-  try {
-    const rl = await limitCreations(env, ip);
-    if (rl.limited) return tooMany(env, req, res, rl.retryAfter);
-  } catch (err) {
-    console.error('rate limiting unavailable:', err);
-    send(env, req, res, { error: 'printing_unavailable' }, 503);
-    return;
+  if (!existingPoster || !existingSticker) needUpload = true;
+
+  let imageId: string | null = null;
+  if (needUpload) {
+    try {
+      const rl = await limitCreations(env, ip);
+      if (rl.limited) return tooMany(env, req, res, rl.retryAfter);
+    } catch (err) {
+      console.error('rate limiting unavailable:', err);
+      send(env, req, res, { error: 'printing_unavailable' }, 503);
+      return;
+    }
   }
 
   try {
     const size = Buffer.from(body.image_base64, 'base64').byteLength;
     const dims = jpegDimensions(Buffer.from(body.image_base64, 'base64')) ?? { width: 800, height: 800 };
-    const imageId = await uploadImage(env, body.image_base64, size, dims);
-    const created = await createProduct(env, { imageId, city, designHash: hash });
-    await persistDesign(env, hash, created);
+
+    let posterVariants: CreatedProduct['variants'] | undefined = existingPoster ? undefined : undefined;
+    if (existingPoster) {
+      poster = existingPoster;
+    } else {
+      if (imageId === null) imageId = await uploadImage(env, body.image_base64, size, dims);
+      const created = await createDesignProduct(env, imageId, {
+        templateId: POSTER_TEMPLATE_ID,
+        colors: POSTER_COLORS,
+        sizes: POSTER_SIZES,
+        profitMargin: POSTER_MARGIN_USD,
+        kind: 'poster',
+        city,
+        country,
+        designHash: hash,
+      });
+      await persistDesign(env, hash, 'poster', { productId: created.productId, slug: created.slug });
+      poster = { productId: created.productId, slug: created.slug };
+      posterVariants = created.variants;
+    }
+
+    // Always ensure the sticker product exists so it shows up in the shop catalog.
+    const needStickerUpload = !existingSticker;
+    if (needStickerUpload && imageId === null) imageId = await uploadImage(env, body.image_base64, size, dims);
+    if (!existingSticker) {
+      try {
+        if (imageId === null) imageId = await uploadImage(env, body.image_base64, size, dims);
+        const createdSticker = await createDesignProduct(env, imageId!, {
+          templateId: STICKER_TEMPLATE_ID,
+          colors: STICKER_COLORS,
+          sizes: STICKER_SIZES,
+          profitMargin: STICKER_MARGIN_USD,
+          kind: 'sticker',
+          city,
+          country,
+          designHash: hash,
+        });
+        await persistDesign(env, hash, 'sticker', { productId: createdSticker.productId, slug: createdSticker.slug });
+      } catch (err) {
+        console.error('create-fourthwall sticker failed (poster still created):', err);
+      }
+    }
+
+    // Only return poster variants when freshly created.
     send(env, req, res, {
-      product_url: productUrl(env, created.slug),
-      product_id: created.productId,
-      currency: created.variants[0]?.priceCents !== undefined ? 'USD' : 'USD',
-      reused: false,
-      variants: created.variants,
+      product_url: productUrl(env, poster.slug),
+      product_id: poster.productId,
+      currency: 'USD',
+      reused: Boolean(existingPoster),
+      variants: posterVariants,
     }, 200);
   } catch (err) {
     console.error('create-fourthwall failed:', err);

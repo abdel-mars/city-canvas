@@ -8,6 +8,7 @@ import type { ArtworkSettings, City } from '@/types/artwork';
 const lisbon: City = {
   name: 'Lisbon',
   displayName: 'Lisbon, Portugal',
+  country: 'Portugal',
   lat: 38.7223,
   lon: -9.1393,
   boundingBox: [38.70, -9.20, 38.75, -9.10],

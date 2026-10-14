@@ -1,6 +1,7 @@
 export interface City {
   name: string;
   displayName: string;
+  country?: string;
   lat: number;
   lon: number;
   boundingBox: [number, number, number, number]; // south, west, north, east

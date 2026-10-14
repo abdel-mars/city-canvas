@@ -139,7 +139,7 @@ const DownloadShare = ({ svgRef, city, bbox, settings, textColor, onTransparentC
           <AlertDialogHeader>
             <AlertDialogTitle>Gift your {city.name} map?</AlertDialogTitle>
             <AlertDialogDescription>
-              Opens a page for this poster, where you can pick a size and pay on Fourthwall.
+              Opens a page for this framed poster, where you can pick a size and frame and pay on Fourthwall.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -7,7 +7,7 @@ const REQUESTS_PER_HOUR_PER_IP = 120;
 
 const IP_RE = /^[0-9a-f:.]{3,45}$/i;
 
-const FOURTHWALL_TEMPLATE_ID = (process.env.FOURTHWALL_TEMPLATE_ID ?? 'pro_15bc29bc8a324d449d').trim();
+const FOURTHWALL_TEMPLATE_ID = (process.env.FOURTHWALL_TEMPLATE_ID ?? 'pro_kRSsoYjwSoyyTEmWko5o0A').trim();
 const PROFIT_MARGIN_USD = 12;
 
 export interface ApiRequest {
@@ -51,6 +51,7 @@ function readEnv(): Env {
     FOURTHWALL_API_PASSWORD: process.env.FOURTHWALL_API_PASSWORD ?? '',
     FOURTHWALL_SHOP_DOMAIN: process.env.FOURTHWALL_SHOP_DOMAIN ?? '',
     APP_ORIGIN: process.env.APP_ORIGIN ?? '',
+    FOURTHWALL_TEMPLATE_ID: (process.env.FOURTHWALL_TEMPLATE_ID ?? 'pro_kRSsoYjwSoyyTEmWko5o0A').trim(),
     UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
     UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
   };
@@ -132,7 +133,7 @@ interface FourthwallTemplateDetail {
   colorVariants: FourthwallColorVariant[];
 }
 
-const ALLOWED_SQUARES = new Set([12, 16, 18]);
+const ALLOWED_SQUARES = new Set([10, 14, 18]);
 
 async function harvestSizes(env: Env): Promise<{ currency: string; variants: PosterVariant[] }> {
   const tpl = await fwFetch<FourthwallTemplateDetail>(env, `/open-api/v1.0/product-templates/${FOURTHWALL_TEMPLATE_ID}`);
