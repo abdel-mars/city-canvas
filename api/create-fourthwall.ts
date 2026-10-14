@@ -253,7 +253,7 @@ async function createProduct(env: Env, opts: { imageId: string; city: string; de
   if (!created.productId) throw new Error('Fourthwall create returned no productId');
   const detail = await fwFetch<ProductDetail>(env, `/open-api/v1.0/products/${created.productId}`);
   if (!detail.slug) throw new Error('Fourthwall product has no slug');
-  const sizeRe = /^(\d+(?:\.\d+)?)\s*["″'′]?\s*x\s*(\d+(?:\.\d+)?)\s*["″'′]?/i;
+  const sizeRe = /(\d+(?:\.\d+)?)\s*["″'′]?\s*x\s*(\d+(?:\.\d+)?)\s*["″'′]?/i;
   const variants = (detail.variants ?? []).map((v) => {
     const m = sizeRe.exec(v.name ?? '');
     const w = m ? Number(m[1]) : 0;
