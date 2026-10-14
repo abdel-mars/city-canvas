@@ -88,7 +88,7 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
     const displayText =
       showCustomName && customName ? `City of ${customName}` : city.name;
 
-    const sizeFactor = 0.5 + textSize / 100;
+    const sizeFactor = 0.5 + Math.max(50, textSize) / 100;
     const baseFontSize = font === 'handwritten' ? 32 : 22;
     const fontSize = Math.round(baseFontSize * sizeFactor);
     const letterSpacing = font === 'mono' ? 6 : font === 'sans' ? 4 : 2;
@@ -225,7 +225,7 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
 
             {/* City name */}
             {roads.length > 0 && (
-              <motion.text
+          <motion.text
                 x={CANVAS_SIZE / 2}
                 y={textY}
                 textAnchor="middle"
@@ -241,6 +241,11 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
                 style={{ transition: 'fill 0.4s ease' }}
               >
                 {displayText.toUpperCase()}
+                {showCustomName && (
+                  <tspan x={CANVAS_SIZE / 2} dy={fontSize + 8} dominantBaseline="hanging">
+                    {Math.round(textPositionY)}
+                  </tspan>
+                )}
               </motion.text>
             )}
           </svg>

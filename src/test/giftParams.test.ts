@@ -50,12 +50,12 @@ describe('giftParams round-trip', () => {
   });
 
   it('preserves every artwork setting', () => {
-    const s = settings({ font: 'mono', textPositionY: 42.5, textSize: 30, customName: 'Casablanca', showCustomName: true });
+    const s = settings({ font: 'mono', textPositionY: 42.5, textSize: 80, customName: 'Casablanca', showCustomName: true });
     const decoded = decodeGiftParams(encodeGiftParams(lisbon, s));
     if (!decoded.ok) throw new Error('expected a valid design');
     expect(decoded.design.settings.font).toBe('mono');
     expect(decoded.design.settings.textPositionY).toBe(42.5);
-    expect(decoded.design.settings.textSize).toBe(30);
+    expect(decoded.design.settings.textSize).toBe(80);
     expect(decoded.design.settings.customName).toBe('Casablanca');
     expect(decoded.design.settings.showCustomName).toBe(true);
   });

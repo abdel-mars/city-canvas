@@ -126,10 +126,7 @@ export function decodeGiftParams(input: URLSearchParams | string): GiftDecodeOut
   }
 
   const textSizeParam = num(params.get('s'));
-  const textSize = textSizeParam === null ? 50 : textSizeParam;
-  if (textSize < 0 || textSize > 100) {
-    return { ok: false, error: 'size' };
-  }
+  const textSize = textSizeParam === null ? 50 : Math.max(50, Math.min(100, textSizeParam));
 
   const displayName = (params.get('display') ?? '').trim();
   const countryParam = (params.get('country') ?? '').trim();

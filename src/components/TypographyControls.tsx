@@ -82,7 +82,7 @@ const TypographyControls = ({
           <span className="text-[10px] text-muted-foreground/60">Small</span>
           <input
             type="range"
-            min={0}
+            min={50}
             max={100}
             value={textSize}
             onChange={(e) => onSizeChange(Number(e.target.value))}
@@ -129,15 +129,8 @@ const TypographyControls = ({
               exit={{ opacity: 0, height: 0 }}
               transition={{ duration: 0.2 }}
             >
-              <input
-                type="text"
-                value={customName}
-                onChange={(e) => onCustomNameChange(e.target.value)}
-                placeholder="Your name"
-                className="w-full px-3 py-2 text-sm bg-secondary/50 border border-border rounded-lg outline-none focus:border-foreground/20 transition-colors"
-              />
-              <p className="mt-1.5 text-[11px] text-muted-foreground">
-                Displays as "City of {customName || '...'}"
+              <p className="text-[11px] text-muted-foreground">
+                Shows the text position value as a number under the city name on the canvas.
               </p>
             </motion.div>
           )}
