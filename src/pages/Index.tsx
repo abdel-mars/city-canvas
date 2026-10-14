@@ -198,7 +198,7 @@ const Index = () => {
             {/* Left column: header + artwork */}
             <div className="shrink-0 h-[55dvh] lg:h-auto lg:flex-1 min-w-0 flex flex-col relative">
               <header className="absolute top-0 left-0 right-0 z-20 flex items-center justify-center gap-4 px-5 py-3.5 bg-transparent border-none pointer-events-none">
-                <div className="w-full max-w-sm pointer-events-auto">
+                <div className="w-full max-w-sm">
                   <CitySearch onSelect={handleCitySelect} compact />
                 </div>
               </header>
@@ -264,7 +264,7 @@ const Index = () => {
             </div>
 
             {/* Right panel: full height from top to bottom */}
-            <aside className="lg:w-72 xl:w-80 border-t lg:border-t-0 lg:border-l border-border bg-card/40 shadow-[0_-8px_3px_0px_rgba(0,0,0,0.25)] lg:shadow-[-11px_8px_3px_0px_rgba(0,0,0,0.25)] overflow-y-auto overflow-x-hidden lg:h-screen">
+            <aside className="lg:w-72 xl:w-80 border-t lg:border-t-0 lg:border-l border-border bg-card/40 shadow-[0_-8px_20px_0px_rgba(0,0,0,0.25)] lg:shadow-[-11px_8px_20px_0px_rgba(0,0,0,0.25)] overflow-y-auto overflow-x-hidden lg:h-screen">
               <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/40">
                 <button
                   onClick={() => setSelectedCity(null)}
