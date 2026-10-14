@@ -51,7 +51,7 @@ function showPreparing(tab: Window) {
     'font:15px/1.6 "DM Sans",system-ui,sans-serif;text-align:center;padding:2rem';
   doc.body.innerHTML =
     '<div><p style="font-family:Georgia,serif;font-size:30px;margin:0 0 10px">Preparing your poster…</p>' +
-    '<p style="opacity:.6;margin:0">Creating your print on Printify</p></div>';
+    '<p style="opacity:.6;margin:0">Creating your print on Fourthwall</p></div>';
 }
 
 const GiftPage = () => {
@@ -93,7 +93,7 @@ const GiftPage = () => {
   useEffect(() => {
     if (!city) return;
     let cancelled = false;
-    fetch('/api/printify-pricing')
+    fetch('/api/fourthwall-pricing')
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((data: { currency?: string; variants?: PosterVariant[] }) => {
         if (cancelled) return;
@@ -149,7 +149,7 @@ const GiftPage = () => {
       let url: string | null = null;
       for (let attempt = 0; attempt < PREPARE_ATTEMPTS && !url; attempt++) {
         if (attempt > 0) await new Promise((r) => setTimeout(r, PREPARE_RETRY_MS));
-        const res = await fetch('/api/create-printify', {
+        const res = await fetch('/api/create-fourthwall', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -165,7 +165,7 @@ const GiftPage = () => {
             if (data.currency) setCurrency(data.currency);
           }
           if (!url) {
-            fail('We could not open the Printify page for this poster. Please try again.');
+            fail('We could not open the Fourthwall page for this poster. Please try again.');
             return;
           }
         } else if (res.status === 202) {
@@ -339,7 +339,7 @@ const GiftPage = () => {
               </>
             ) : (
               <>
-                Complete purchase on Printify
+                Complete purchase on Fourthwall
                 <ArrowUpRight className="h-4 w-4" />
               </>
             )}
@@ -347,7 +347,7 @@ const GiftPage = () => {
         </motion.div>
 
         <motion.p {...fade(1)} className="mt-4 text-[13px] text-muted-foreground max-w-sm">
-          Opens on Printify, where checkout, printing and shipping are handled.
+          Opens on Fourthwall, where checkout, printing and shipping are handled.
         </motion.p>
 
         {error && (

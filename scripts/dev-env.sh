@@ -43,7 +43,7 @@ MSG
 fi
 
 missing=0
-for f in redis.txt token-printify.txt; do
+for f in redis.txt fourthwall.txt; do
   if [ ! -f "$f" ]; then
     echo "dev-env: missing $f (expected in the project root, and gitignored)" >&2
     missing=1
@@ -67,11 +67,18 @@ esac
 # has a Shopify-connected shop. Override by exporting PRINTIFY_SHOP_ID before calling this.
 export PRINTIFY_SHOP_ID="${PRINTIFY_SHOP_ID:-26401971}"
 
+fw_user=$(read_secret FOURTHWALL_API_USERNAME fourthwall.txt)
+fw_pass=$(read_secret FOURTHWALL_API_PASSWORD fourthwall.txt)
+fw_domain=$(read_secret FOURTHWALL_SHOP_DOMAIN fourthwall.txt)
+export FOURTHWALL_API_USERNAME="$fw_user"
+export FOURTHWALL_API_PASSWORD="$fw_pass"
+export FOURTHWALL_SHOP_DOMAIN="$fw_domain"
+
 export UPSTASH_REDIS_REST_URL="$redis_url"
 export UPSTASH_REDIS_REST_TOKEN="$redis_tok"
 export PRINTIFY_API_KEY="$(tr -d '\r\n' < token-printify.txt)"
 export PRINTIFY_STORE_DOMAIN="${PRINTIFY_STORE_DOMAIN:-citylines-art}"
 export PRINTIFY_CURRENCY="${PRINTIFY_CURRENCY:-USD}"
 
-echo "dev-env: Printify + Upstash loaded (Printify shop ${PRINTIFY_SHOP_ID}), starting vercel dev"
+echo "dev-env: Fourthwall + Upstash loaded (shop ${FOURTHWALL_SHOP_DOMAIN}), starting vercel dev"
 exec npx vercel dev "$@"

@@ -139,7 +139,7 @@ const DownloadShare = ({ svgRef, city, bbox, settings, textColor, onTransparentC
           <AlertDialogHeader>
             <AlertDialogTitle>Gift your {city.name} map?</AlertDialogTitle>
             <AlertDialogDescription>
-              Opens a page for this poster, where you can pick a size and pay on Printify.
+              Opens a page for this poster, where you can pick a size and pay on Fourthwall.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

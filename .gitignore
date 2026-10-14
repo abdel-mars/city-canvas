@@ -19,6 +19,7 @@ dist-ssr
 # Local scratch files that hold real credentials. Keep these OUTSIDE the repo.
 redis.txt
 token-printify.txt
+fourthwall.txt
 secrets*.txt
 *-secret*.txt
 # One-shot harness against the live Printify and Upstash accounts, reading the credential files
