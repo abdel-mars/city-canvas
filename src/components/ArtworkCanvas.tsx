@@ -241,11 +241,11 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
                 style={{ transition: 'fill 0.4s ease' }}
               >
                 {displayText.toUpperCase()}
-                {showCustomName && (
-                  <tspan x={CANVAS_SIZE / 2} dy={fontSize + 8} dominantBaseline="hanging">
-                    {Math.round(textPositionY)}
-                  </tspan>
-                )}
+                    {showCustomName && (
+                      <tspan x={CANVAS_SIZE / 2} dy={fontSize + 2} dominantBaseline="hanging">
+                        {city.lat.toFixed(4)}, {city.lon.toFixed(4)}
+                      </tspan>
+                    )}
               </motion.text>
             )}
           </svg>

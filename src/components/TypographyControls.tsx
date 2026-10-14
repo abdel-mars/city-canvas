@@ -130,7 +130,7 @@ const TypographyControls = ({
               transition={{ duration: 0.2 }}
             >
               <p className="text-[11px] text-muted-foreground">
-                Shows the text position value as a number under the city name on the canvas.
+                Shows the city’s coordinates under the city name so you can paste them into Google Maps.
               </p>
             </motion.div>
           )}
