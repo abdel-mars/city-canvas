@@ -137,7 +137,7 @@ const Index = () => {
           >
             {/* Left column: header + artwork */}
             <div className="flex-1 min-w-0 flex flex-col">
-              <header className="flex items-center gap-4 px-5 py-3.5 border-b border-border">
+              <header className="flex items-center justify-center gap-4 px-5 py-3.5 border-b border-border">
                 <button
                   onClick={() => setSelectedCity(null)}
                   className="text-lg font-display tracking-tight text-foreground hover:opacity-60 transition-opacity duration-200 shrink-0"
