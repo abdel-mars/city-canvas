@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import CitySearch from '@/components/CitySearch';
 import ArtworkCanvas from '@/components/ArtworkCanvas';
@@ -33,6 +33,8 @@ const Index = () => {
   });
 
   const [transparent, setTransparent] = useState(false);
+  const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+  const mainRef = useRef<HTMLDivElement>(null);
   const { roads, bbox, isLoading, error, loadRoads } = useRoadData();
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -40,9 +42,33 @@ const Index = () => {
     setTransparent(value);
   }, []);
 
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const px = e.clientX - rect.left;
+      const py = e.clientY - rect.top;
+      const factor = e.deltaY > 0 ? 1 / 1.1 : 1.1;
+      setView((prev) => {
+        const nextScale = Math.min(4, Math.max(0.5, prev.scale * factor));
+        const actual = nextScale / prev.scale;
+        return {
+          scale: nextScale,
+          x: px - (px - prev.x) * actual,
+          y: py - (py - prev.y) * actual,
+        };
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, [selectedCity]);
+
   const handleCitySelect = (city: City) => {
     setSelectedCity(city);
     loadRoads(city);
+    setView({ scale: 1, x: 0, y: 0 });
   };
 
   return (
@@ -151,18 +177,43 @@ const Index = () => {
               </header>
 
               {/* Artwork area */}
-              <main className="flex-1 flex flex-col relative overflow-hidden" style={{ backgroundColor: settings.background }}>
-                <div className="flex-1 flex items-center justify-center min-h-0 p-0">
-                  <ArtworkCanvas
-                    ref={svgRef}
-                    city={selectedCity}
-                    roads={roads}
-                    bbox={bbox ?? undefined}
-                    settings={settings}
-                    isLoading={isLoading}
-                    transparent={transparent}
-                    size="100%"
-                  />
+              <main
+                ref={mainRef}
+                className="flex-1 flex flex-col relative overflow-hidden"
+                style={
+                  transparent
+                    ? {
+                        backgroundColor: 'transparent',
+                        backgroundImage:
+                          'radial-gradient(circle, #d4d4d4 1px, transparent 1px)',
+                        backgroundSize: '20px 20px',
+                      }
+                    : { backgroundColor: settings.background }
+                }
+              >
+                <div
+                  className="flex-1 flex items-center justify-center min-h-0 p-0"
+                  style={{ touchAction: 'none' }}
+                >
+                  <div
+                    style={{
+                      transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+                      transformOrigin: '0 0',
+                      width: '100%',
+                      height: '100%',
+                    }}
+                  >
+                    <ArtworkCanvas
+                      ref={svgRef}
+                      city={selectedCity}
+                      roads={roads}
+                      bbox={bbox ?? undefined}
+                      settings={settings}
+                      isLoading={isLoading}
+                      transparent={transparent}
+                      size="100%"
+                    />
+                  </div>
                 </div>
 
                 {error && (

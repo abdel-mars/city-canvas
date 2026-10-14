@@ -151,11 +151,6 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
             maxHeight: '100%',
             boxShadow: frame ? FRAMED_SHADOW : 'none',
             borderRadius: frame ? '12px' : 0,
-            ...(transparent && {
-              backgroundImage: 'radial-gradient(circle, #d4d4d4 1px, transparent 1px)',
-              backgroundSize: '20px 20px',
-              backgroundPosition: '0 0',
-            }),
           }}
         >
           <svg
