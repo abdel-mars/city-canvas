@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Road, ArtworkSettings, City } from '@/types/artwork';
 import { createProjection, getStrokeWidth } from '@/lib/projection';
 import { fontMap } from '@/lib/presets';
+import { shapeForBbox, shapeGeometry } from '@/lib/posterShape';
 
 interface ArtworkCanvasProps {
   city: City;
@@ -33,7 +34,6 @@ interface ArtworkCanvasProps {
   label?: string;
 }
 
-const CANVAS_SIZE = 800;
 const PADDING = 60;
 
 /** The creator's existing edge, kept verbatim so an unframed canvas is pixel-identical. */
@@ -47,13 +47,15 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
   ({ city, roads, settings, isLoading, bbox, transparent = false, size, frame = false, label }, ref) => {
     const { background, road, text, font, textPositionY, textSize, customName, showCustomName, preset } = settings;
 
+    // The window the roads actually cover, which the proxy may have shrunk from the city's own
+    // extent. Its proportions choose the poster shape, so the map fills the sheet instead of
+    // floating in a letterboxed square.
+    const { width: canvasW, height: canvasH } = shapeGeometry(shapeForBbox(bbox ?? city.boundingBox));
+
     const project = useMemo(() => {
-      return createProjection({
-        bbox: bbox ?? city.boundingBox,
-        width: CANVAS_SIZE,
-        height: CANVAS_SIZE,
-        padding: PADDING,
-      });
+      const window = bbox ?? city.boundingBox;
+      const { width, height } = shapeGeometry(shapeForBbox(window));
+      return createProjection({ bbox: window, width, height, padding: PADDING });
     }, [bbox, city.boundingBox]);
 
     const groupedPaths = useMemo(() => {
@@ -80,7 +82,7 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
       }));
     }, [roads, project]);
 
-    const textY = 30 + (textPositionY / 100) * (CANVAS_SIZE - 55);
+    const textY = 30 + (textPositionY / 100) * (canvasH - 55);
     const dominantBaseline =
       textPositionY < 20 ? 'hanging' : textPositionY > 80 ? 'auto' : 'central';
 
@@ -142,19 +144,19 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
         >
           <svg
             ref={ref}
-            viewBox={`0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}`}
+            viewBox={`0 0 ${canvasW} ${canvasH}`}
             className={`w-full h-full ${frame ? 'rounded-[11px]' : ''}`}
             role={label ? 'img' : undefined}
             aria-label={label}
             style={{
-              aspectRatio: '1 / 1',
+              aspectRatio: `${canvasW} / ${canvasH}`,
             }}
           >
             {/* Background — hidden in transparent mode */}
             {!transparent && (
               <rect
-                width={CANVAS_SIZE}
-                height={CANVAS_SIZE}
+                width={canvasW}
+                height={canvasH}
                 fill={background}
                 rx={0}
                 style={{ transition: 'fill 0.4s ease' }}
@@ -200,7 +202,7 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
             {/* City name */}
             {roads.length > 0 && (
           <motion.text
-                x={CANVAS_SIZE / 2}
+                x={canvasW / 2}
                 y={textY}
                 textAnchor="middle"
                 dominantBaseline={dominantBaseline}
@@ -216,7 +218,7 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
               >
                 {displayText.toUpperCase()}
                     {showCustomName && (
-                      <tspan x={CANVAS_SIZE / 2} dy={fontSize + 2} dominantBaseline="hanging">
+                      <tspan x={canvasW / 2} dy={fontSize + 2} dominantBaseline="hanging">
                         {city.lat.toFixed(4)} {city.lon.toFixed(4)}
                       </tspan>
                     )}

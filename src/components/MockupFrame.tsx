@@ -3,10 +3,12 @@ import { motion } from 'framer-motion';
 import { Road, ArtworkSettings, City } from '@/types/artwork';
 import { createProjection, getStrokeWidth } from '@/lib/projection';
 import { fontMap } from '@/lib/presets';
+import { shapeForBbox, shapeGeometry } from '@/lib/posterShape';
 import type { BBox } from '@/lib/overpass';
 
-const CANVAS_SIZE = 800;
 const FRAMED_SHADOW = '0px 8px 30px rgba(0, 0, 0, 0.15)';
+/** Long edge of the framed print, before the black frame is added. */
+const LONG_EDGE = 'min(64vh, 64vw, 560px)';
 
 interface MockupFrameProps {
   city: City;
@@ -25,15 +27,17 @@ export const MockupFrame = forwardRef<SVGSVGElement, MockupFrameProps>(
     const name = showCustomName && customName ? customName : city.name;
     const [hovered, setHovered] = useState(false);
 
+    const { width: canvasW, height: canvasH } = shapeGeometry(shapeForBbox(bbox ?? city.boundingBox));
+
     const projection = useMemo(
       () =>
         createProjection({
           bbox: bbox ?? city.boundingBox,
-          width: CANVAS_SIZE,
-          height: CANVAS_SIZE,
+          width: canvasW,
+          height: canvasH,
           padding: 0,
         }),
-      [bbox, city.boundingBox]
+      [bbox, city.boundingBox, canvasW, canvasH]
     );
 
     const groupedPaths = useMemo(() => {
@@ -86,6 +90,11 @@ export const MockupFrame = forwardRef<SVGSVGElement, MockupFrameProps>(
     // Only the black frame is used, in both the resting and hover states.
     const FRAME_COLOR = '#252525';
 
+    // The print keeps the city's shape: the long edge is fixed and the other follows the canvas
+    // aspect, so a landscape sheet is wider than it is tall and a portrait one the reverse.
+    const artWidth = canvasW >= canvasH ? LONG_EDGE : `calc(${LONG_EDGE} * ${canvasW} / ${canvasH})`;
+    const artHeight = canvasH >= canvasW ? LONG_EDGE : `calc(${LONG_EDGE} * ${canvasH} / ${canvasW})`;
+
     return (
       <motion.div
         className={`relative flex items-center justify-center [perspective:1600px] ${className}`}
@@ -116,25 +125,25 @@ export const MockupFrame = forwardRef<SVGSVGElement, MockupFrameProps>(
           <div
             className="relative rounded-none overflow-hidden"
             style={{
-              width: 'min(64vh, 64vw, 560px)',
-              height: 'min(64vh, 64vw, 560px)',
+              width: artWidth,
+              height: artHeight,
               maxWidth: '100%',
               maxHeight: '100%',
-              aspectRatio: '1 / 1',
+              aspectRatio: `${canvasW} / ${canvasH}`,
             }}
           >
             <svg
               ref={ref}
-              viewBox={`0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}`}
+              viewBox={`0 0 ${canvasW} ${canvasH}`}
               className="w-full h-full"
               role={label ? 'img' : undefined}
               aria-label={label}
-              style={{ aspectRatio: '1 / 1' }}
+              style={{ aspectRatio: `${canvasW} / ${canvasH}` }}
             >
               {!transparent && (
                 <rect
-                  width={CANVAS_SIZE}
-                  height={CANVAS_SIZE}
+                  width={canvasW}
+                  height={canvasH}
                   fill={background}
                   rx={0}
                   style={{ transition: 'fill 0.4s ease' }}
@@ -179,8 +188,8 @@ export const MockupFrame = forwardRef<SVGSVGElement, MockupFrameProps>(
                 initial={{ opacity: 0 }}
                 animate={{ opacity: roads.length > 0 ? 1 : 0 }}
                 transition={{ duration: 1.2, delay: 0.6 }}
-                x={CANVAS_SIZE / 2}
-                y={textPositionY * (CANVAS_SIZE / 100)}
+                x={canvasW / 2}
+                y={textPositionY * (canvasH / 100)}
                 fill={text}
                 fontFamily={fontMap[font]}
                 fontSize={fontSize}
@@ -191,7 +200,7 @@ export const MockupFrame = forwardRef<SVGSVGElement, MockupFrameProps>(
                 {name}
                 {city.country && (
                   <tspan
-                    x={CANVAS_SIZE / 2}
+                    x={canvasW / 2}
                     dy={fontSize + 2}
                     fontSize={Math.round(fontSize * 0.45)}
                     letterSpacing="2px"

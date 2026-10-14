@@ -26,7 +26,19 @@ const STICKER_SHEET_MARGIN_USD = 6;
 const POSTER_COLORS = ['Black', 'Red Oak'];
 const STICKER_COLORS = ['White'];
 const STICKER_SHEET_COLORS = ['White'];
-const POSTER_SIZES = ['10" x 10"', '14" x 14"', '18" x 18"'];
+
+/** Poster shapes are a pure function of the city's window, so the client tells us which one it drew. */
+type PosterShape = 'square' | 'horizontal' | 'vertical';
+const POSTER_SIZES_BY_SHAPE: Record<PosterShape, string[]> = {
+  square: ['10" x 10"', '14" x 14"', '18" x 18"'],
+  // A landscape design is a portrait frame hung on its side, so both non-square shapes use the
+  // same 3:4 frames.
+  horizontal: ['12" x 16"', '18" x 24"'],
+  vertical: ['12" x 16"', '18" x 24"'],
+};
+function isPosterShape(value: unknown): value is PosterShape {
+  return value === 'square' || value === 'horizontal' || value === 'vertical';
+}
 const STICKER_SIZES = ['3" x 3"', '4" x 4"', '5.5" x 5.5"'];
 
 
@@ -215,7 +227,7 @@ interface UploadUrlResponse { uploadUrl: string; fileUrl: string }
 interface MediaImageResponse { id: string; uri?: string }
 interface CreateProductResponse { productId: string; customizationId?: string; images?: unknown[] }
 interface ProductDetail { id: string; slug: string; name?: string; variants?: { id: string; name: string; unitPrice?: { value: number; currency: string } }[] }
-interface CreatedProduct { productId: string; slug: string; variants: { id: string; title: string; inches: number; priceCents: number; color?: string }[] }
+interface CreatedProduct { productId: string; slug: string; variants: { id: string; title: string; inches: number; width: number; height: number; priceCents: number; color?: string }[] }
 
 async function uploadImage(env: Env, imageBase64: string, size: number, dims: { width: number; height: number }) {
   const meta = await fwFetch<UploadUrlResponse>(env, '/open-api/v1.0/media/upload-url', {
@@ -314,12 +326,12 @@ async function createDesignProduct(env: Env, imageId: string, spec: ProductSpec)
   const sizeRe = /(\d+(?:\.\d+)?)\s*["″'′]?\s*x\s*(\d+(?:\.\d+)?)\s*["″'′]?/i;
   const variants = (detail.variants ?? []).map((v) => {
     const m = sizeRe.exec(v.name ?? '');
-    const w = m ? Number(m[1]) : 0;
-    const h = m ? Number(m[2]) : 0;
-    const inches = w === h ? w : 0;
+    const width = m ? Number(m[1]) : 0;
+    const height = m ? Number(m[2]) : 0;
+    const inches = width > 0 && height > 0 ? Math.min(width, height) : 0;
     const color = spec.colors.find((c) => (v.name ?? '').toLowerCase().includes(c.toLowerCase()));
     const priceCents = Math.round((v.unitPrice?.value ?? 0) * 100);
-    return { id: v.id, title: v.name ?? '', inches, color, priceCents };
+    return { id: v.id, title: v.name ?? '', inches, width, height, color, priceCents };
   }).filter((v) => v.inches > 0);
   return { productId: created.productId, slug: detail.slug, variants };
 }
@@ -412,7 +424,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     send(env, req, res, { error: 'payload_too_large' }, 413);
     return;
   }
-  let body: { image_base64?: string; city_name?: string; city_country?: string; design_hash?: string };
+  let body: { image_base64?: string; city_name?: string; city_country?: string; design_hash?: string; shape?: string };
   if (typeof req.body === 'string') {
     if (req.body.length > MAX_BODY_BYTES) { send(env, req, res, { error: 'payload_too_large' }, 413); return; }
     try { body = JSON.parse(req.body) as typeof body; } catch { send(env, req, res, { error: 'invalid_json' }, 400); return; }
@@ -456,6 +468,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   }
 
   const hash = body.design_hash;
+  // The shape only decides which frame sizes are offered; an unknown value falls back to square,
+  // which is what every pre-existing design was.
+  const posterSizes = POSTER_SIZES_BY_SHAPE[isPosterShape(body.shape) ? body.shape : 'square'];
   const existingPoster = await resolveExisting(env, hash, 'poster');
   let poster: { productId: string; slug: string };
   let needUpload = !existingPoster;
@@ -488,7 +503,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
       const created = await createDesignProduct(env, imageId, {
         templateId: POSTER_TEMPLATE_ID,
         colors: POSTER_COLORS,
-        sizes: POSTER_SIZES,
+        sizes: posterSizes,
         profitMargin: POSTER_MARGIN_USD,
         kind: 'poster',
         city,

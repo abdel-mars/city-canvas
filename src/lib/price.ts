@@ -11,8 +11,11 @@ export interface PosterVariant {
   color?: string;
   /** Raw Printify variant title, e.g. `16″ x 16″ / Matte`. */
   title: string;
-  /** Square side length in inches. The artwork is 1:1, so only square sizes are sold. */
+  /** Short side in inches, kept for square-only callers. */
   inches: number;
+  /** Full frame dimensions in inches. Equal for square posters, otherwise width may be < height. */
+  width?: number;
+  height?: number;
   priceCents: number;
 }
 

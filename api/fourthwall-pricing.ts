@@ -13,6 +13,8 @@ const PROFIT_MARGIN_USD = 12;
 export interface ApiRequest {
   method?: string;
   headers: Record<string, string | string[] | undefined>;
+  query?: Record<string, string | string[] | undefined>;
+  url?: string;
 }
 export interface ApiResponse {
   status(code: number): ApiResponse;
@@ -34,6 +36,8 @@ export interface PosterVariant {
   id: string;
   title: string;
   inches: number;
+  width?: number;
+  height?: number;
   priceCents: number;
 }
 export interface PosterPricing {
@@ -109,12 +113,13 @@ function storeConfigured(env: Env): boolean {
 }
 
 const SIZE_RE = /^(\d+(?:\.\d+)?)\s*["″'′]?\s*x\s*(\d+(?:\.\d+)?)\s*["″'′]?/i;
-function squareInches(title: string): number | null {
+function sizeDims(title: string): { width: number; height: number } | null {
   const m = SIZE_RE.exec(title ?? '');
   if (!m) return null;
-  const w = Number(m[1]);
-  const h = Number(m[2]);
-  return Number.isFinite(w) && Number.isFinite(h) && w === h ? w : null;
+  const width = Number(m[1]);
+  const height = Number(m[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return { width, height };
 }
 
 interface FourthwallSizeVariant {
@@ -133,36 +138,70 @@ interface FourthwallTemplateDetail {
   colorVariants: FourthwallColorVariant[];
 }
 
-const ALLOWED_SQUARES = new Set([10, 14, 18]);
+type PosterShape = 'square' | 'horizontal' | 'vertical';
 
-async function harvestSizes(env: Env): Promise<{ currency: string; variants: PosterVariant[] }> {
+/** The frame sizes on offer for each shape, as the template names them. */
+const ALLOWED_SIZES: Record<PosterShape, { width: number; height: number }[]> = {
+  square: [
+    { width: 10, height: 10 },
+    { width: 14, height: 14 },
+    { width: 18, height: 18 },
+  ],
+  // A landscape design hangs on a portrait frame turned on its side, so both non-square shapes
+  // draw from the same 3:4 frames.
+  horizontal: [
+    { width: 12, height: 16 },
+    { width: 18, height: 24 },
+  ],
+  vertical: [
+    { width: 12, height: 16 },
+    { width: 18, height: 24 },
+  ],
+};
+
+function isPosterShape(value: unknown): value is PosterShape {
+  return value === 'square' || value === 'horizontal' || value === 'vertical';
+}
+
+function requestShape(req: ApiRequest): PosterShape {
+  const raw = req.query?.shape ?? (req.url ? new URL(req.url, 'http://localhost').searchParams.get('shape') : null);
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return isPosterShape(value) ? value : 'square';
+}
+
+async function harvestSizes(env: Env, shape: PosterShape): Promise<{ currency: string; variants: PosterVariant[] }> {
+  const allowed = ALLOWED_SIZES[shape];
+  const matches = (d: { width: number; height: number }) =>
+    allowed.some((a) => a.width === d.width && a.height === d.height);
   const tpl = await fwFetch<FourthwallTemplateDetail>(env, `/open-api/v1.0/product-templates/${FOURTHWALL_TEMPLATE_ID}`);
   const currency = tpl.priceFrom?.currency ?? 'USD';
   const bySize = new Map<string, FourthwallSizeVariant>();
   for (const cv of tpl.colorVariants ?? []) {
     if (!cv) continue;
     for (const sv of cv.sizeVariants ?? []) {
-      const inches = squareInches(sv.size);
-      if (inches === null || !ALLOWED_SQUARES.has(inches)) continue;
+      const dims = sizeDims(sv.size);
+      if (dims === null || !matches(dims)) continue;
       if (!bySize.has(sv.size)) bySize.set(sv.size, sv);
     }
   }
   const variants: PosterVariant[] = [];
   for (const [size, sv] of bySize.entries()) {
-    const inches = squareInches(size)!;
+    const dims = sizeDims(size)!;
     variants.push({
       id: sv.variantId,
       title: sv.size,
-      inches,
+      inches: Math.min(dims.width, dims.height),
+      width: dims.width,
+      height: dims.height,
       priceCents: priceFor(sv.price.amount),
     });
   }
   variants.sort((a, b) => a.inches - b.inches);
-  if (variants.length === 0) throw new Error('no qualifying square poster sizes found');
+  if (variants.length === 0) throw new Error(`no qualifying ${shape} poster sizes found`);
   return { currency, variants };
 }
 
-const cacheKey = (env: Env) => `fourthwall:pricing:v1:${env.FOURTHWALL_TEMPLATE_ID}`;
+const cacheKey = (env: Env, shape: PosterShape) => `fourthwall:pricing:v2:${env.FOURTHWALL_TEMPLATE_ID}:${shape}`;
 const buildKey = () => `fourthwall:pricing:build:${new Date().toISOString().slice(0, 13)}`;
 const ipKey = (ip: string) => `fourthwall:pricing:rl:h:${ip}:${new Date().toISOString().slice(0, 13)}`;
 
@@ -183,9 +222,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   }
   const url = env.UPSTASH_REDIS_REST_URL!;
   const token = env.UPSTASH_REDIS_REST_TOKEN!;
+  const shape = requestShape(req);
 
   // read cache
-  const r1 = await redisPipeline(url, token, [['GET', cacheKey(env)]]);
+  const r1 = await redisPipeline(url, token, [['GET', cacheKey(env, shape)]]);
   let cached: { currency: string; variants: PosterVariant[] } | null = null;
   if (typeof r1[0] === 'string') {
     try {
@@ -219,8 +259,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
       res.status(503).json({ error: 'pricing_unavailable' });
       return;
     }
-    const pricing = await harvestSizes(env);
-    await redisPipeline(url, token, [['SET', cacheKey(env), JSON.stringify(pricing), 'EX', CACHE_TTL_SECONDS]]);
+    const pricing = await harvestSizes(env, shape);
+    await redisPipeline(url, token, [['SET', cacheKey(env, shape), JSON.stringify(pricing), 'EX', CACHE_TTL_SECONDS]]);
     res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=600');
     res.status(200).json({ ...pricing, stale: false });
   } catch (err) {

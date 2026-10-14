@@ -7,6 +7,7 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { decodeGiftParams } from '@/lib/giftParams';
 import { designHash } from '@/lib/designHash';
 import { formatPrice, type PosterVariant } from '@/lib/price';
+import { shapeForBbox } from '@/lib/posterShape';
 import { generatePrintArtworkBase64 } from '@/lib/download';
 import { useRoadData } from '@/hooks/useRoadData';
 import { useNoindex } from '@/hooks/useNoindex';
@@ -69,6 +70,13 @@ const GiftPage = () => {
   const { roads, bbox, isLoading, error: geoError, loadRoads } = useRoadData();
   const svgRef = useRef<SVGSVGElement>(null);
 
+  // The shape the poster is drawn at, which is also the shape sold. It follows the window the roads
+  // actually cover, so it must wait for bbox to arrive rather than keying off the city alone.
+  const shape = useMemo(
+    () => shapeForBbox(bbox ?? city?.boundingBox ?? [0, 0, 0, 0]),
+    [bbox, city],
+  );
+
   const [variants, setVariants] = useState<PosterVariant[] | null>(null);
   const [currency, setCurrency] = useState('USD');
   const [settled, setSettled] = useState(false);
@@ -93,7 +101,7 @@ const GiftPage = () => {
   useEffect(() => {
     if (!city) return;
     let cancelled = false;
-    fetch('/api/fourthwall-pricing')
+    fetch(`/api/fourthwall-pricing?shape=${shape}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error(String(res.status)))))
       .then((data: { currency?: string; variants?: PosterVariant[] }) => {
         if (cancelled) return;
@@ -106,7 +114,7 @@ const GiftPage = () => {
     return () => {
       cancelled = true;
     };
-  }, [city]);
+  }, [city, shape]);
 
   // Mobile sticky bar appears only once the in-flow button has left the viewport.
   useEffect(() => {
@@ -144,6 +152,7 @@ const GiftPage = () => {
         image_base64: await generatePrintArtworkBase64(svgRef.current, 5),
         city_name: city.name,
         design_hash: designHash(city.name, settings, city),
+        shape,
       };
 
       let url: string | null = null;
@@ -215,7 +224,7 @@ const GiftPage = () => {
       setError('Something went wrong. Please try again.');
       setPhase('idle');
     }
-  }, [city, settings, phase]);
+  }, [city, settings, phase, shape]);
 
   // A rejected link cannot be repaired, so never render a page of the wrong poster.
   if (!decoded.ok || !city || !settings) return <Navigate to="/" replace />;
@@ -311,7 +320,7 @@ const GiftPage = () => {
               {sizes.map((v) => (
                 <div key={v.id} className="py-4 sm:px-6">
                   <dt className="text-sm text-foreground">
-                    {v.inches} × {v.inches}″
+                    {v.width ?? v.inches} × {v.height ?? v.inches}″
                   </dt>
                   <dd className="mt-0.5 text-sm text-muted-foreground tabular-nums">
                     {formatPrice(v.priceCents, currency)}
