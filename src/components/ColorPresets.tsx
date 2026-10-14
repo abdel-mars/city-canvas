@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import { Sparkles } from 'lucide-react';
 import { ColorPreset } from '@/types/artwork';
 import { colorPresets } from '@/lib/presets';
 import {
@@ -41,21 +42,12 @@ const ColorPresets = ({
             <TooltipTrigger asChild>
               <button
                 onClick={() => onSelect(preset)}
-                className="group relative p-1"
+                className="group relative"
               >
                 {preset.isNeon && (
-                  <motion.span
-                    aria-hidden
-                    className="absolute inset-0 rounded-full pointer-events-none"
-                    style={{ boxShadow: `0 0 0 0 ${preset.road}` }}
-                    animate={{
-                      boxShadow: [
-                        `0 0 0 0 ${preset.road}00`,
-                        `0 0 0 10px ${preset.road}33`,
-                        `0 0 0 0 ${preset.road}00`,
-                      ],
-                    }}
-                    transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                  <Sparkles
+                    className="absolute -top-1 -right-1 w-3 h-3 text-emerald-400 drop-shadow-[0_0_2px_#00FF88]"
+                    strokeWidth={2}
                   />
                 )}
                 <motion.div
