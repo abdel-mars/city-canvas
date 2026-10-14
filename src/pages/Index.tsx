@@ -151,8 +151,8 @@ const Index = () => {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.35, duration: 0.6, ease: 'easeOut' }}
               /* White glass on a cream page loses its edge, so light mode gets a real border. */
-              className={`w-full max-w-md backdrop-blur-xl rounded-2xl shadow-2xl border ${
-                isDark ? 'bg-white/40 border-white/20' : 'bg-white/70 border-zinc-200'
+              className={`w-full max-w-md backdrop-blur-2xl backdrop-saturate-150 rounded-2xl border ${
+                isDark ? 'bg-white/10 border-white/15' : 'bg-white/40 border-white/50'
               }`}
             >
               <CitySearch onSelect={handleCitySelect} />
@@ -193,10 +193,10 @@ const Index = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.4 }}
-            className="min-h-screen flex flex-col lg:flex-row"
+            className="min-h-screen flex flex-col lg:flex-row lg:h-screen"
           >
             {/* Left column: header + artwork */}
-            <div className="flex-1 min-w-0 flex flex-col relative">
+            <div className="shrink-0 h-[55dvh] lg:h-auto lg:flex-1 min-w-0 flex flex-col relative">
               <header className="absolute top-0 left-0 right-0 z-20 flex items-center justify-center gap-4 px-5 py-3.5 bg-transparent border-none pointer-events-none">
                 <div className="w-full max-w-sm pointer-events-auto">
                   <CitySearch onSelect={handleCitySelect} compact />
@@ -264,7 +264,7 @@ const Index = () => {
             </div>
 
             {/* Right panel: full height from top to bottom */}
-            <aside className="lg:w-72 xl:w-80 border-t lg:border-t-0 lg:border-l border-border bg-card/40 overflow-y-auto overflow-x-hidden lg:h-screen">
+            <aside className="lg:w-72 xl:w-80 border-t lg:border-t-0 lg:border-l border-border bg-card/40 shadow-[0_-8px_3px_0px_rgba(0,0,0,0.25)] lg:shadow-[-11px_8px_3px_0px_rgba(0,0,0,0.25)] overflow-y-auto overflow-x-hidden lg:h-screen">
               <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/40">
                 <button
                   onClick={() => setSelectedCity(null)}

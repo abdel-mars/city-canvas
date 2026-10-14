@@ -63,9 +63,9 @@ const CitySearch = ({ onSelect, compact = false }: CitySearchProps) => {
                 ? 'border-red-500/50 focus:border-red-500/70'
                 : 'border-red-300 focus:border-red-400'
               : isDark
-                ? 'bg-zinc-900/80 border border-zinc-800/60 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500/60 focus:bg-zinc-950 shadow-xl shadow-black/10'
-                : 'bg-white/80 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400/60 focus:bg-white shadow-xl shadow-zinc-200/50'
-          } backdrop-blur-xl hover:border-zinc-400/30 dark:hover:border-zinc-700/50`}
+                ? 'bg-zinc-900/50 border border-white/10 text-zinc-100 placeholder:text-zinc-400 focus:border-indigo-400/60 focus:bg-zinc-900/70 backdrop-blur-2xl backdrop-saturate-150 hover:border-white/20'
+                : 'bg-white/60 border border-white/50 text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400/60 focus:bg-white/80 backdrop-blur-2xl backdrop-saturate-150'
+          }`}
         />
       </div>
 
