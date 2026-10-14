@@ -19,12 +19,16 @@ const HASH_RE = /^[a-f0-9]{8,16}$/;
 
 const POSTER_TEMPLATE_ID = (process.env.FOURTHWALL_TEMPLATE_ID ?? 'pro_kRSsoYjwSoyyTEmWko5o0A').trim();
 const STICKER_TEMPLATE_ID = (process.env.FOURTHWALL_STICKER_TEMPLATE_ID ?? 'pro_358').trim();
+const STICKER_SHEET_TEMPLATE_ID = (process.env.FOURTHWALL_STICKER_SHEET_TEMPLATE_ID ?? 'pro_6a8bdd4fd14d4cf687').trim();
 const POSTER_MARGIN_USD = 12;
 const STICKER_MARGIN_USD = 6;
+const STICKER_SHEET_MARGIN_USD = 6;
 const POSTER_COLORS = ['Black', 'Red Oak'];
 const STICKER_COLORS = ['White'];
+const STICKER_SHEET_COLORS = ['White'];
 const POSTER_SIZES = ['10" x 10"', '14" x 14"', '18" x 18"'];
 const STICKER_SIZES = ['3" x 3"', '4" x 4"', '5.5" x 5.5"'];
+
 
 export interface ApiRequest {
   method?: string;
@@ -245,9 +249,9 @@ function esc(s: string): string {
 interface ProductSpec {
   templateId: string;
   colors: string[];
-  sizes: string[];
+  sizes?: string[];
   profitMargin: number;
-  kind: 'poster' | 'sticker';
+  kind: 'poster' | 'sticker' | 'sticker-sheet';
   city: string;
   country: string;
   designHash: string;
@@ -256,7 +260,9 @@ interface ProductSpec {
 function productTitle(spec: ProductSpec): string {
   const city = esc(spec.city);
   const country = esc(spec.country);
-  const kind = spec.kind === 'poster' ? 'City Lines Art Framed Poster' : 'City Lines Art Sticker';
+  let kind = 'City Lines Art Sticker';
+  if (spec.kind === 'poster') kind = 'City Lines Art Framed Poster';
+  else if (spec.kind === 'sticker-sheet') kind = 'City Lines Art Sticker Sheet';
   if (country) return `${city} | ${country} | ${kind}`;
   return `${city} | ${kind}`;
 }
@@ -272,15 +278,18 @@ function productDescription(spec: ProductSpec): string {
       `<p>Part of <em>City Lines</em>, a visual collection exploring the identity of cities around the world through minimalist line art.</p>`,
       `<p>One city. Countless lines. A place worth framing.</p>`,
       token,
-    ].join('\n');
+    ].join('\\n');
   }
+  const stickerIntro = spec.kind === 'sticker-sheet'
+    ? 'presented as a sheet of kiss-cut stickers of varying sizes.'
+    : 'designed for stickers.';
   return [
     `<p><strong>${city}</strong>, drawn through its streets.</p>`,
-    `<p>A study of the city's urban rhythm, transformed into minimalist line art designed for stickers. Intersecting roads, geometric patterns, and the movement of everyday life become a unique visual representation of ${city}, ready to accompany you wherever you go.</p>`,
+    `<p>A study of the city's urban rhythm, transformed into minimalist line art ${stickerIntro} Intersecting roads, geometric patterns, and the movement of everyday life become a unique visual representation of ${city}, ready to accompany you wherever you go.</p>`,
     `<p>Part of <em>City Lines</em>, a visual collection exploring the identity of cities around the world through minimalist line art.</p>`,
     `<p>One city. Countless lines. Take your city with you.</p>`,
     token,
-  ].join('\n');
+  ].join('\\n');
 }
 
 async function createDesignProduct(env: Env, imageId: string, spec: ProductSpec): Promise<CreatedProduct> {
@@ -292,7 +301,7 @@ async function createDesignProduct(env: Env, imageId: string, spec: ProductSpec)
       productTemplateId: spec.templateId,
       name: productTitle(spec),
       description: productDescription(spec),
-      regions: [{ region: 'default', imageId, placementStrategy: 'AUTO' }],
+      regions: [{ region: 'default', imageId, placementStrategy: spec.kind === 'sticker-sheet' ? 'FILL_ALL' : 'AUTO' }],
       colors: spec.colors,
       sizes: spec.sizes,
       profitMargin: spec.profitMargin,
@@ -323,7 +332,7 @@ function productUrl(env: Env, slug: string) {
 const memo = new Map<string, { at: number; value: { productId: string; slug: string } }>();
 const MEMO_TTL_MS = 30_000;
 
-async function resolveExisting(env: Env, hash: string, type: 'poster' | 'sticker'): Promise<{ productId: string; slug: string } | null> {
+async function resolveExisting(env: Env, hash: string, type: 'poster' | 'sticker' | 'sticker-sheet'): Promise<{ productId: string; slug: string } | null> {
   const cached = memo.get(`${type}:${hash}`);
   if (cached && Date.now() - cached.at < MEMO_TTL_MS) return cached.value;
 
@@ -342,7 +351,7 @@ async function resolveExisting(env: Env, hash: string, type: 'poster' | 'sticker
     } catch { /* fall through */ }
   }
 
-  const marker = type === 'poster' ? 'Framed Poster' : 'Stickers';
+  const marker = type === 'poster' ? 'Framed Poster' : type === 'sticker' ? 'Stickers' : 'Sticker Sheet';
   for (let page = 0; page < 5; page++) {
     try {
       const body = await fwFetch<{ results?: { id: string; name?: string; slug?: string }[] }>(
@@ -365,7 +374,7 @@ async function resolveExisting(env: Env, hash: string, type: 'poster' | 'sticker
   return null;
 }
 
-async function persistDesign(env: Env, hash: string, type: 'poster' | 'sticker', value: { productId: string; slug: string }) {
+async function persistDesign(env: Env, hash: string, type: 'poster' | 'sticker' | 'sticker-sheet', value: { productId: string; slug: string }) {
   const url = env.UPSTASH_REDIS_REST_URL!;
   const token = env.UPSTASH_REDIS_REST_TOKEN!;
   const key = `fw:design:${type}:${hash}`;
@@ -451,8 +460,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   let poster: { productId: string; slug: string };
   let needUpload = !existingPoster;
   const existingSticker = await resolveExisting(env, hash, 'sticker');
+  const existingStickerSheet = await resolveExisting(env, hash, 'sticker-sheet');
 
-  if (!existingPoster || !existingSticker) needUpload = true;
+  if (!existingPoster || !existingSticker || !existingStickerSheet) needUpload = true;
 
   let imageId: string | null = null;
   if (needUpload) {
@@ -509,6 +519,28 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
         await persistDesign(env, hash, 'sticker', { productId: createdSticker.productId, slug: createdSticker.slug });
       } catch (err) {
         console.error('create-fourthwall sticker failed (poster still created):', err);
+      }
+    }
+
+    // Sticker sheet (multiple stickers, varying sizes) — auto-create so the
+    // same artwork surfaces in the shop catalog as a sticker sheet.
+    const needSheetUpload = !existingStickerSheet;
+    if (needSheetUpload && imageId === null) imageId = await uploadImage(env, body.image_base64, size, dims);
+    if (!existingStickerSheet) {
+      try {
+        if (imageId === null) imageId = await uploadImage(env, body.image_base64, size, dims);
+        const createdSheet = await createDesignProduct(env, imageId!, {
+          templateId: STICKER_SHEET_TEMPLATE_ID,
+          colors: STICKER_SHEET_COLORS,
+          profitMargin: STICKER_SHEET_MARGIN_USD,
+          kind: 'sticker-sheet',
+          city,
+          country,
+          designHash: hash,
+        });
+        await persistDesign(env, hash, 'sticker-sheet', { productId: createdSheet.productId, slug: createdSheet.slug });
+      } catch (err) {
+        console.error('create-fourthwall sticker sheet failed (poster still created):', err);
       }
     }
 
