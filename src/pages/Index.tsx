@@ -35,6 +35,8 @@ const Index = () => {
   const [transparent, setTransparent] = useState(false);
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
   const mainRef = useRef<HTMLDivElement>(null);
+  const dragStartRef = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
   const { roads, bbox, isLoading, error, loadRoads } = useRoadData();
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -61,9 +63,41 @@ const Index = () => {
         };
       });
     };
+    const onPointerDown = (e: PointerEvent) => {
+      setView((prev) => {
+        if (prev.scale <= 1) return prev;
+        dragStartRef.current = { px: e.clientX, py: e.clientY, x: prev.x, y: prev.y };
+        setDragging(true);
+        return prev;
+      });
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!dragging || !dragStartRef.current) return;
+      const dx = e.clientX - dragStartRef.current.px;
+      const dy = e.clientY - dragStartRef.current.py;
+      setView((prev) => ({
+        ...prev,
+        x: dragStartRef.current!.x + dx,
+        y: dragStartRef.current!.y + dy,
+      }));
+    };
+    const endDrag = () => {
+      dragStartRef.current = null;
+      setDragging(false);
+    };
     el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [selectedCity]);
+    el.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', endDrag);
+    window.addEventListener('pointercancel', endDrag);
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', endDrag);
+      window.removeEventListener('pointercancel', endDrag);
+    };
+  }, [selectedCity, dragging]);
 
   const handleCitySelect = (city: City) => {
     setSelectedCity(city);
@@ -180,16 +214,18 @@ const Index = () => {
               <main
                 ref={mainRef}
                 className="flex-1 relative overflow-hidden"
-                style={
-                  transparent
+                style={{
+                  ...(transparent
                     ? {
                         backgroundColor: 'transparent',
                         backgroundImage:
                           'radial-gradient(circle, #d4d4d4 1px, transparent 1px)',
                         backgroundSize: '20px 20px',
                       }
-                    : { backgroundColor: settings.background }
-                }
+                    : { backgroundColor: settings.background }),
+                  cursor: dragging ? 'grabbing' : view.scale > 1 ? 'grab' : 'default',
+                  userSelect: 'none',
+                }}
               >
                 <div
                   className="absolute inset-0 flex items-center justify-center"
@@ -220,6 +256,16 @@ const Index = () => {
                   <div className="px-6 pb-4 lg:hidden">
                     <p className="text-sm text-muted-foreground text-center">{error}</p>
                   </div>
+                )}
+
+                {(view.scale !== 1 || view.x !== 0 || view.y !== 0) && (
+                  <button
+                    type="button"
+                    onClick={() => setView({ scale: 1, x: 0, y: 0 })}
+                    className="absolute bottom-4 right-4 z-20 rounded-full border border-border bg-card/80 px-3 py-1.5 text-xs text-foreground backdrop-blur transition-colors hover:bg-card"
+                  >
+                    Reset view
+                  </button>
                 )}
               </main>
             </div>
