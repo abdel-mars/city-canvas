@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCitySearch } from '@/hooks/useCitySearch';
-import { useTheme } from '@/hooks/useTheme';
 import { City } from '@/types/artwork';
 
 interface CitySearchProps {
@@ -14,9 +13,9 @@ const CitySearch = ({ onSelect, compact = false }: CitySearchProps) => {
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
   const { results, isSearching, error, search, clearResults } = useCitySearch();
-  const { theme } = useTheme();
   const wrapperRef = useRef<HTMLDivElement>(null);
-  const isDark = theme === 'dark';
+  /** The search bar keeps its dark treatment in both site themes. */
+  const isDark = true;
 
   useEffect(() => {
     search(query);
@@ -66,7 +65,7 @@ const CitySearch = ({ onSelect, compact = false }: CitySearchProps) => {
               : isDark
                 ? 'bg-zinc-900/80 border border-zinc-800/60 text-zinc-100 placeholder:text-zinc-500 focus:border-indigo-500/60 focus:bg-zinc-950 shadow-xl shadow-black/10'
                 : 'bg-white/80 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400/60 focus:bg-white shadow-xl shadow-zinc-200/50'
-          } backdrop-blur-md hover:border-zinc-400/30 dark:hover:border-zinc-700/50`}
+          } backdrop-blur-xl hover:border-zinc-400/30 dark:hover:border-zinc-700/50`}
         />
       </div>
 
