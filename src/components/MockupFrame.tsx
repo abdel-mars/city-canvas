@@ -103,7 +103,7 @@ export const MockupFrame = forwardRef<SVGSVGElement, MockupFrameProps>(
           className="relative rounded-none p-3 sm:p-4"
           style={{ backgroundColor: FRAME_COLOR, transformStyle: 'preserve-3d' }}
           animate={{
-            rotateY: hovered ? -18 : 0,
+            rotateY: hovered ? 18 : 0,
             rotateX: hovered ? 4 : 0,
             scale: hovered ? 1.02 : 1,
             boxShadow: hovered
