@@ -141,13 +141,7 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
         transition={{ duration: 0.6 }}
       >
         {/* Gallery light — subtle radial glow behind canvas */}
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background: 'radial-gradient(ellipse at center, hsl(var(--accent) / 0.06) 0%, transparent 70%)',
-          }}
-        />
-
+        {/* removed for flat workspace view */}
         <div
           className={`relative ${frame ? 'ring-1 ring-border' : ''}`}
           style={{
@@ -155,12 +149,10 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
             height: size ?? 'min(90vh, 95vw, 800px)',
             maxWidth: '100%',
             maxHeight: '100%',
-            boxShadow: frame ? FRAMED_SHADOW : DEFAULT_SHADOW,
-            borderRadius: '12px',
-            // Dot pattern when transparent mode is active
+            boxShadow: frame ? FRAMED_SHADOW : 'none',
+            borderRadius: frame ? '12px' : 0,
             ...(transparent && {
-              backgroundImage:
-                'radial-gradient(circle, #d4d4d4 1px, transparent 1px)',
+              backgroundImage: 'radial-gradient(circle, #d4d4d4 1px, transparent 1px)',
               backgroundSize: '20px 20px',
               backgroundPosition: '0 0',
             }),
@@ -169,7 +161,7 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
           <svg
             ref={ref}
             viewBox={`0 0 ${CANVAS_SIZE} ${CANVAS_SIZE}`}
-            className="w-full h-full rounded-lg"
+            className={`w-full h-full ${frame ? 'rounded-[11px]' : ''}`}
             role={label ? 'img' : undefined}
             aria-label={label}
             style={{
@@ -182,7 +174,7 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
                 width={CANVAS_SIZE}
                 height={CANVAS_SIZE}
                 fill={background}
-                rx={8}
+                rx={0}
                 style={{ transition: 'fill 0.4s ease' }}
               />
             )}

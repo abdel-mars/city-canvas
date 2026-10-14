@@ -151,8 +151,8 @@ const Index = () => {
               </header>
 
               {/* Artwork area */}
-              <main className="flex-1 flex flex-col relative overflow-hidden">
-                <div className="flex-1 flex items-center justify-center p-4 md:p-6 lg:p-8 min-h-0">
+              <main className="flex-1 flex flex-col relative overflow-hidden" style={{ backgroundColor: settings.background }}>
+                <div className="flex-1 flex items-center justify-center min-h-0 p-0">
                   <ArtworkCanvas
                     ref={svgRef}
                     city={selectedCity}
@@ -161,6 +161,7 @@ const Index = () => {
                     settings={settings}
                     isLoading={isLoading}
                     transparent={transparent}
+                    size="100%"
                   />
                 </div>
 
