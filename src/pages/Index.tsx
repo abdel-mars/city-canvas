@@ -133,62 +133,62 @@ const Index = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.4 }}
-            className="min-h-screen flex flex-col"
+            className="min-h-screen flex flex-col lg:flex-row"
           >
-            {/* Header */}
-            <header className="flex items-center gap-4 px-5 py-3.5 border-b border-border">
-              <button
-                onClick={() => setSelectedCity(null)}
-                className="text-lg font-display tracking-tight text-foreground hover:opacity-60 transition-opacity duration-200 shrink-0"
-              >
-                City Lines
-              </button>
-              <div className="flex-1 max-w-sm">
-                <CitySearch onSelect={handleCitySelect} compact />
-              </div>
-              <ThemeToggle />
-            </header>
-
-            {/* Main content */}
-            <main className="flex-1 flex flex-col lg:flex-row overflow-hidden relative">
-            {/* Artwork area */}
-              <div className="flex-1 flex items-center justify-center p-4 md:p-6 lg:p-8 min-h-0">
-                <ArtworkCanvas
-                  ref={svgRef}
-                  city={selectedCity}
-                  roads={roads}
-                  bbox={bbox ?? undefined}
-                  settings={settings}
-                  isLoading={isLoading}
-                  transparent={transparent}
-                />
-              </div>
-
-              {/* Error message */}
-              {error && (
-                <div className="px-6 pb-4 lg:hidden">
-                  <p className="text-sm text-muted-foreground text-center">{error}</p>
+            {/* Left column: header + artwork */}
+            <div className="flex-1 min-w-0 flex flex-col">
+              <header className="flex items-center gap-4 px-5 py-3.5 border-b border-border">
+                <button
+                  onClick={() => setSelectedCity(null)}
+                  className="text-lg font-display tracking-tight text-foreground hover:opacity-60 transition-opacity duration-200 shrink-0"
+                >
+                  City Lines
+                </button>
+                <div className="flex-1 max-w-sm">
+                  <CitySearch onSelect={handleCitySelect} compact />
                 </div>
-              )}
+                <ThemeToggle />
+              </header>
 
-              {/* Controls sidebar */}
-              <aside className="lg:w-72 xl:w-80 border-t lg:border-t-0 lg:border-l border-border bg-card/40 overflow-y-auto overflow-x-hidden">
+              {/* Artwork area */}
+              <main className="flex-1 flex flex-col relative overflow-hidden">
+                <div className="flex-1 flex items-center justify-center p-4 md:p-6 lg:p-8 min-h-0">
+                  <ArtworkCanvas
+                    ref={svgRef}
+                    city={selectedCity}
+                    roads={roads}
+                    bbox={bbox ?? undefined}
+                    settings={settings}
+                    isLoading={isLoading}
+                    transparent={transparent}
+                  />
+                </div>
+
                 {error && (
-                  <div className="px-6 pt-6 hidden lg:block">
-                    <p className="text-sm text-muted-foreground">{error}</p>
+                  <div className="px-6 pb-4 lg:hidden">
+                    <p className="text-sm text-muted-foreground text-center">{error}</p>
                   </div>
                 )}
-                <ControlPanel
-                  settings={settings}
-                  onSettingsChange={setSettings}
-                  svgRef={svgRef}
-                  city={selectedCity}
-                  bbox={bbox ?? undefined}
-                  hasRoads={roads.length > 0}
-                  onTransparentChange={handleTransparentChange}
-                />
-              </aside>
-            </main>
+              </main>
+            </div>
+
+            {/* Right panel: full height from top to bottom */}
+            <aside className="lg:w-72 xl:w-80 border-t lg:border-t-0 lg:border-l border-border bg-card/40 overflow-y-auto overflow-x-hidden lg:h-screen">
+              {error && (
+                <div className="px-6 pt-6 hidden lg:block">
+                  <p className="text-sm text-muted-foreground">{error}</p>
+                </div>
+              )}
+              <ControlPanel
+                settings={settings}
+                onSettingsChange={setSettings}
+                svgRef={svgRef}
+                city={selectedCity}
+                bbox={bbox ?? undefined}
+                hasRoads={roads.length > 0}
+                onTransparentChange={handleTransparentChange}
+              />
+            </aside>
           </motion.div>
         )}
       </AnimatePresence>
