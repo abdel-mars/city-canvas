@@ -85,8 +85,6 @@ export const MockupFrame = forwardRef<SVGSVGElement, MockupFrameProps>(
 
     // Only the black frame is used, in both the resting and hover states.
     const FRAME_COLOR = '#252525';
-    // Slightly lighter edge tone; a hard offset shadow gives the frame visible depth/thickness.
-    const FRAME_EDGE = '#3a3a3a';
 
     return (
       <motion.div
@@ -109,8 +107,8 @@ export const MockupFrame = forwardRef<SVGSVGElement, MockupFrameProps>(
             rotateX: hovered ? 4 : 0,
             scale: hovered ? 1.02 : 1,
             boxShadow: hovered
-              ? `13px 13px 0 ${FRAME_EDGE}, 34px 30px 64px rgba(0, 0, 0, 0.45)`
-              : `8px 8px 0 ${FRAME_EDGE}, ${FRAMED_SHADOW}`,
+              ? '30px 26px 60px rgba(0, 0, 0, 0.45)'
+              : FRAMED_SHADOW,
           }}
           transition={{ duration: 0.6, ease: 'easeOut' }}
         >
