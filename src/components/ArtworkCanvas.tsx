@@ -3,7 +3,6 @@ import { motion } from 'framer-motion';
 import { Road, ArtworkSettings, City } from '@/types/artwork';
 import { createProjection, getStrokeWidth } from '@/lib/projection';
 import { fontMap } from '@/lib/presets';
-import { Skeleton } from '@/components/ui/skeleton';
 
 interface ArtworkCanvasProps {
   city: City;
@@ -93,41 +92,29 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
     const fontSize = Math.round(baseFontSize * sizeFactor);
     const letterSpacing = font === 'mono' ? 6 : font === 'sans' ? 4 : 2;
 
-    // Show skeleton while loading (no roads yet)
+    // Loading sits flat in the workspace: no card, no ring — just three dots.
     if (isLoading && roads.length === 0) {
       return (
         <motion.div
-          className="w-full flex items-center justify-center"
+          className="w-full h-full flex items-center justify-center"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.4 }}
         >
-          <div
-            className={`relative ${frame ? 'ring-1 ring-border' : ''}`}
-            style={
-              size
-                ? { width: size, height: size, maxWidth: '100%', maxHeight: '100%', aspectRatio: '1 / 1' }
-                : { maxHeight: '80vh', maxWidth: '80vh', aspectRatio: '1 / 1', width: '100%' }
-            }
-          >
-            <Skeleton className="w-full h-full rounded-xl" />
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="flex gap-2">
-                {[0, 1, 2].map((i) => (
-                  <motion.div
-                    key={i}
-                    className="w-1.5 h-1.5 rounded-full bg-muted-foreground"
-                    animate={{ opacity: [0.2, 0.6, 0.2] }}
-                    transition={{
-                      duration: 1.8,
-                      repeat: Infinity,
-                      delay: i * 0.25,
-                      ease: 'easeInOut',
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
+          <div className="flex gap-2.5">
+            {[0, 1, 2].map((i) => (
+              <motion.div
+                key={i}
+                className="w-2 h-2 rounded-full bg-foreground/50"
+                animate={{ opacity: [0.25, 0.9, 0.25], scale: [0.85, 1, 0.85] }}
+                transition={{
+                  duration: 1.6,
+                  repeat: Infinity,
+                  delay: i * 0.22,
+                  ease: 'easeInOut',
+                }}
+              />
+            ))}
           </div>
         </motion.div>
       );

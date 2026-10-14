@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Search, Loader2, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCitySearch } from '@/hooks/useCitySearch';
+import { useTheme } from '@/hooks/useTheme';
 import { City } from '@/types/artwork';
 
 interface CitySearchProps {
@@ -17,6 +18,8 @@ const CitySearch = ({ onSelect, compact = false }: CitySearchProps) => {
   const wrapperRef = useRef<HTMLDivElement>(null);
   /** The search bar keeps its dark treatment in both site themes. */
   const isDark = true;
+  const { theme } = useTheme();
+  const themeIsDark = theme === 'dark';
 
   useEffect(() => {
     search(query);
@@ -66,7 +69,16 @@ const CitySearch = ({ onSelect, compact = false }: CitySearchProps) => {
       : collapsed
         ? `bg-white/40 border border-white/50 hover:bg-white/60 ${glass}`
         : `bg-white/60 border border-white/50 text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400/60 focus:bg-white/80 ${glass}`;
-  const iconColor = collapsed ? 'text-zinc-200' : isDark ? 'text-zinc-500' : 'text-zinc-400';
+  const iconColor = collapsed
+    ? themeIsDark
+      ? 'text-zinc-200'
+      : 'text-zinc-700'
+    : themeIsDark
+      ? 'text-zinc-500'
+      : 'text-zinc-600';
+  const clearColor = themeIsDark
+    ? 'text-zinc-400 hover:text-zinc-200'
+    : 'text-zinc-600 hover:text-zinc-800';
 
   return (
     <div ref={wrapperRef} className="relative w-full">
@@ -117,7 +129,7 @@ const CitySearch = ({ onSelect, compact = false }: CitySearchProps) => {
               exit={{ scale: 0.85, opacity: 0 }}
               transition={{ duration: 0.4, ease: 'easeOut' }}
               onClick={handleClear}
-              className="pointer-events-auto absolute right-3 flex items-center justify-center w-6 h-6 rounded-full bg-white/10 backdrop-blur-xl backdrop-saturate-150 border border-white/20 text-zinc-400 hover:bg-white/20 hover:text-zinc-200 transition-colors"
+              className={`pointer-events-auto absolute right-3 flex items-center justify-center w-6 h-6 rounded-full bg-white/10 backdrop-blur-xl backdrop-saturate-150 border border-white/20 hover:bg-white/20 transition-colors ${clearColor}`}
               aria-label="Clear search"
             >
               <X className="w-3.5 h-3.5" />

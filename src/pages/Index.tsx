@@ -7,6 +7,7 @@ import BackgroundArt from '@/components/BackgroundArt';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { City, ArtworkSettings } from '@/types/artwork';
 import { colorPresets } from '@/lib/presets';
+import { MARS_URL } from '@/lib/watermark';
 import { useRoadData } from '@/hooks/useRoadData';
 import { useTheme } from '@/hooks/useTheme';
 
@@ -65,7 +66,9 @@ const Index = () => {
     };
     const onPointerDown = (e: PointerEvent) => {
       setView((prev) => {
-        if (prev.scale <= 1) return prev;
+        // Panning is meaningful whenever the view is transformed — zoomed in, zoomed out, or
+        // already offset. At the untouched default there is nothing to drag.
+        if (prev.scale === 1 && prev.x === 0 && prev.y === 0) return prev;
         dragStartRef.current = { px: e.clientX, py: e.clientY, x: prev.x, y: prev.y };
         setDragging(true);
         return prev;
@@ -177,7 +180,7 @@ const Index = () => {
               <span aria-hidden="true"> · </span>
               Designed by{' '}
               <a
-                href="https://elmahmoudi.42web.io/?i=1"
+                href={MARS_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={CREDIT_LINK}
@@ -216,7 +219,7 @@ const Index = () => {
                         backgroundSize: '20px 20px',
                       }
                     : { backgroundColor: settings.background }),
-                  cursor: dragging ? 'grabbing' : view.scale > 1 ? 'grab' : 'default',
+                  cursor: dragging ? 'grabbing' : view.scale !== 1 ? 'grab' : 'default',
                   userSelect: 'none',
                 }}
               >
