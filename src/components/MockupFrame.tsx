@@ -85,6 +85,8 @@ export const MockupFrame = forwardRef<SVGSVGElement, MockupFrameProps>(
 
     // Only the black frame is used, in both the resting and hover states.
     const FRAME_COLOR = '#252525';
+    // Slightly lighter edge tone; a hard offset shadow gives the frame visible depth/thickness.
+    const FRAME_EDGE = '#3a3a3a';
 
     return (
       <motion.div
@@ -97,18 +99,18 @@ export const MockupFrame = forwardRef<SVGSVGElement, MockupFrameProps>(
         onFocus={() => setHovered(true)}
         onBlur={() => setHovered(false)}
       >
-        {/* The framed print: square with hard corners and a thin black frame. Front-on at rest,
+        {/* The framed print: square with hard corners and a black frame. Front-on at rest,
             tilted in perspective on hover so it reads as a physical object. */}
         <motion.div
-          className="relative rounded-none p-3 sm:p-4"
+          className="relative rounded-none p-4 sm:p-6"
           style={{ backgroundColor: FRAME_COLOR, transformStyle: 'preserve-3d' }}
           animate={{
             rotateY: hovered ? 18 : 0,
             rotateX: hovered ? 4 : 0,
             scale: hovered ? 1.02 : 1,
             boxShadow: hovered
-              ? '30px 26px 60px rgba(0, 0, 0, 0.45)'
-              : FRAMED_SHADOW,
+              ? `13px 13px 0 ${FRAME_EDGE}, 34px 30px 64px rgba(0, 0, 0, 0.45)`
+              : `8px 8px 0 ${FRAME_EDGE}, ${FRAMED_SHADOW}`,
           }}
           transition={{ duration: 0.6, ease: 'easeOut' }}
         >
