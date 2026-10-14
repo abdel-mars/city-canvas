@@ -54,6 +54,15 @@ async function call(
 
 const validBody = { image_base64: B64, city_name: 'Lisbon', design_hash: 'a1b2c3d4e5' };
 
+/**
+ * The listing tag the endpoint builds for a design hash.
+ *
+ * Derived rather than hardcoded so that changing the prefix in create-printify.ts cannot leave
+ * these dedupe tests asserting against a tag the endpoint will never look for — which is exactly
+ * the silent-pass/fail coupling the `cl-` literals had.
+ */
+const tagFor = (designHash: string) => `cl2-${designHash}`;
+
 /** Counts calls per upstream and serves canned JSON. */
 function mockUpstream(opts: { ipCount?: number; globalCount?: number } = {}) {
   const calls = { printify: 0, redis: 0 };
@@ -295,7 +304,7 @@ describe('endpoint: dedupe', () => {
                 id: '6a21115ff75ca55a1a00c27f',
                 title: 'Lisbon — City Lines Art Poster',
                 blueprint_id: 282,
-                tags: ['cl-a1b2c3d4e5'],
+                tags: [tagFor(validBody.design_hash)],
                 external: { id: '29074930', handle: 'https://citylines-art.printify.me/product/29074930' },
               },
             ],
@@ -330,7 +339,7 @@ describe('endpoint: dedupe', () => {
               {
                 id: '6a21115ff75ca55a1a00c27f',
                 blueprint_id: 282,
-                tags: ['cl-ffff000011'],
+                tags: [tagFor('ffff000011')],
                 external: { id: '1', handle: 'https://evil.example.com/product/1' },
               },
             ],

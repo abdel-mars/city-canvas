@@ -80,19 +80,30 @@ const REQUESTS_PER_HOUR = 60;
 const MAX_BBOX_SPAN = 0.35;
 
 /**
- * Span used when a Nominatim box is too big.
+ * Smallest span a shrink may reach, in degrees.
  *
- * Measured, not guessed. Central Tokyo answers 0.05° with ~4,000 ways but runs out of memory at
- * 0.07°, and central Moscow behaves the same way — that is Overpass's own ceiling, reached long
- * before our MAX_WAYS/MAX_POINTS truncation ever applies. So the clamp is set just under the
- * observed limit rather than just under MAX_BBOX_SPAN: a wider window produces a prettier crop but
- * fails on exactly the megacities people most want to print, and it now fails honestly (503) rather
- * than being blamed on the city.
- *
- * 0.05° is roughly 5.5 km — a dense city-centre district. Only cities whose Nominatim box is
- * oversized get it; ordinary cities keep their natural, much larger extent.
+ * The floor, not the target. 0.05° is roughly 5.5 km — a dense city-centre district — and it is the
+ * size at which Overpass reliably answers even the densest megacities (central Tokyo manages it;
+ * 0.07° runs it out of memory, and central Moscow behaves the same). Everything above this is
+ * attempted first, so ordinary cities keep their natural extent and only genuinely oversized areas
+ * are reduced.
  */
-const CLAMP_SPAN = 0.05;
+const MIN_SPAN = 0.05;
+
+/**
+ * How many shrinking windows a single request may try before giving up.
+ *
+ * Bounded because each attempt costs a real Overpass round trip. The sequence is requested → half
+ * → quarter → MIN_SPAN, so four attempts always reach the floor from the widest legal request,
+ * which is what the densest cities need.
+ */
+const MAX_ROAD_ATTEMPTS = 5;
+
+/** Cached roads plus whether that window was cut short, so a cache hit reports truncation too. */
+interface RoadsPayload {
+  roads: CompactRoad[];
+  truncated: boolean;
+}
 
 /**
  * Slip roads (`*_link`) are excluded on purpose: they are short motorway ramps that dominate
@@ -354,23 +365,27 @@ interface NominatimResult {
 }
 
 /**
- * Clamp a Nominatim box down to something Overpass can actually answer.
+ * Reduce a Nominatim box to something Overpass can actually be asked for.
  *
  * Nominatim frequently returns an administrative area rather than the city: Tokyo comes back as
  * the whole prefecture at 15.7° x 18.4°, Berlin as 0.34° x 0.67°. Those are rejected outright by
  * isValidBbox, so before this the user could pick a city straight from the dropdown and be met
  * with a 400 and "choose a smaller city" — advice they cannot act on.
  *
- * A centred crop is far better than a refusal: 0.25° is roughly 28 km, which frames a dense city
- * centre rather nicely, and it keeps the three biggest metro names usable. Deliberately under
- * MAX_BBOX_SPAN so the arithmetic cannot land on the boundary — a box built to exactly 0.35
- * measures 0.3500000000000014 in floating point and would be rejected anyway.
+ * The crop is deliberately the widest box the proxy will accept, not a hand-picked "nice" size.
+ * Whether Overpass can actually serve that width is a per-question answer that this function cannot
+ * know; handleRoads finds out by trying, shrinking only as far as it must, and reports the window it
+ * ended up using. Hard-coding a conservative crop here instead — which is what a fixed 0.05° clamp
+ * did — threw away real area for every city that could have shown more.
+ *
+ * It sits just under MAX_BBOX_SPAN so the arithmetic cannot land on the boundary: a box built to
+ * exactly 0.35 measures 0.3500000000000014 in floating point and would be rejected by `span > 0.35`.
  */
 export function clampBbox(bbox: [number, number, number, number], lat: number, lon: number): [number, number, number, number] {
   const [south, west, north, east] = bbox;
   if (north - south <= MAX_BBOX_SPAN && east - west <= MAX_BBOX_SPAN) return bbox;
 
-  const half = CLAMP_SPAN / 2;
+  const half = (MAX_BBOX_SPAN - 1e-4) / 2;
   // Clamp the centre into valid coordinate space so a box near a pole or the antimeridian cannot
   // wrap or invert.
   const cLat = Math.min(Math.max(lat, -90 + half), 90 - half);
@@ -528,8 +543,65 @@ function buildRoadsQuery(bbox: [number, number, number, number]): string {
   return `[out:json][timeout:7][maxsize:8388608];(way["highway"~"${HIGHWAY_RE}"](${south},${west},${north},${east}););out geom;`;
 }
 
+/**
+ * Raw box identity, used to build both the roads key and the effective-window key.
+ *
+ * v4, not v3. Under v3 a megacity was clamped at search time to a fixed 0.05° window, so the only
+ * entry that ever existed for Tokyo was the 0.05° one. Those entries are still valid data, but the
+ * window a box resolves to is now decided by handleRoads and may differ from what was asked for, so
+ * the cache has to be able to hold "requested X, got Y". v3 entries would also have made the new
+ * effective-window memo point at a v3 road payload whose shape no longer matches.
+ */
+function bboxId(bbox: [number, number, number, number]): string {
+  return bbox.map((n) => n.toFixed(4)).join(',');
+}
+
 function roadsCacheKey(bbox: [number, number, number, number]): string {
-  return `geo:roads:v3:${bbox.map((n) => n.toFixed(4)).join(',')}`;
+  return `geo:roads:v4:${bboxId(bbox)}`;
+}
+
+/** Which window a request for `requested` was last able to resolve to. */
+function effectiveCacheKey(requested: [number, number, number, number]): string {
+  return `geo:roads:eff:v1:${bboxId(requested)}`;
+}
+
+/**
+ * The windows to try, widest first, ending at MIN_SPAN.
+ *
+ * The requested box comes first untouched — a city whose natural extent fits is asked for at its
+ * natural extent, and only a failure moves it inward. Each retry is a centred crop at half the
+ * previous span, so the sequence from the widest legal request is 0.35 → 0.175 → 0.0875 → 0.05,
+ * which is four attempts and always reaches the floor that dense megacities are known to answer.
+ */
+function candidateWindows(requested: [number, number, number, number]): [number, number, number, number][] {
+  const [south, west, north, east] = requested;
+  const latSpan = north - south;
+  const lonSpan = east - west;
+  const span = Math.max(latSpan, lonSpan);
+  if (span <= MIN_SPAN) return [requested];
+
+  const out: [number, number, number, number][] = [requested];
+  const cLat = (south + north) / 2;
+  const cLon = (west + east) / 2;
+  let current = span;
+  let previousHalf = span / 2;
+
+  while (out.length < MAX_ROAD_ATTEMPTS) {
+    const next = Math.max(current / 2, MIN_SPAN);
+    const half = Math.min(next, latSpan, lonSpan) / 2;
+    // Stop once the crop stops shrinking.
+    //
+    // A plain `current > MIN_SPAN` test is not enough: `2.2 - 2.1` is 0.10000000000000009, so after
+    // halving, `current` stays a hair above MIN_SPAN and the loop appends the window it already
+    // has. Comparing the crop half-widths directly catches that, and matters because a duplicate
+    // is not free — it is a second Overpass query for a box we already know the answer to, spent
+    // on the visitor's rate-limit budget.
+    if (half >= previousHalf - 1e-12) break;
+    out.push([cLat - half, cLon - half, cLat + half, cLon + half]);
+    previousHalf = half;
+    current = next;
+  }
+  return out;
 }
 
 function safeParse(raw: string): unknown {
@@ -538,6 +610,54 @@ function safeParse(raw: string): unknown {
   } catch {
     return null;
   }
+}
+
+/**
+ * Outcome of one window.
+ *
+ * `tooBig` is the only retryable kind, and the distinction matters: a remark means Overpass could
+ * not carry the area, so a smaller window is worth asking for, whereas an empty result means the
+ * area genuinely has no mapped roads, and a subset of it cannot have any either. Retrying the empty
+ * case would spend Overpass requests to learn nothing.
+ */
+type WindowOutcome =
+  | { kind: 'ok'; payload: RoadsPayload }
+  | { kind: 'tooBig' }
+  | { kind: 'empty' };
+
+/**
+ * Fetch one window, collapsing concurrent identical attempts.
+ *
+ * Only `ok` is cached. Both failure kinds are left uncached on purpose: a remark is usually a busy
+ * mirror and worth retrying later, and an empty result must not pin a city to "no roads" for the
+ * 7-day fresh and 30-day stale windows the cache allows.
+ */
+async function fetchWindow(bbox: [number, number, number, number]): Promise<WindowOutcome> {
+  const key = roadsCacheKey(bbox);
+
+  const cached = await cacheGet<RoadsPayload>(key, ROADS_FRESH_TTL);
+  if (cached?.fresh) return { kind: 'ok', payload: cached.value };
+
+  return singleFlight(key, async () => {
+    const again = await cacheGet<RoadsPayload>(key, ROADS_FRESH_TTL);
+    if (again?.fresh) return { kind: 'ok', payload: again.value };
+
+    const data = await fetchOverpass(buildRoadsQuery(bbox));
+    const { roads: list, truncated, remark } = transformRoads(data);
+
+    // Overpass reports timeouts and maxsize overruns in a top-level remark while still answering
+    // HTTP 200, sometimes with no elements at all. Reading only `elements` turns that transient
+    // upstream failure into an empty map, which the visitor would be told is the city's fault.
+    if (remark) return { kind: 'tooBig' };
+    if (list.length === 0) return { kind: 'empty' };
+
+    if (truncated) {
+      console.warn(`geo: truncated map at ${list.length} ways for bbox ${bbox.join(',')}`);
+    }
+    const payload: RoadsPayload = { roads: list, truncated };
+    await cacheSet(key, payload, ROADS_FRESH_TTL, ROADS_STALE_TTL);
+    return { kind: 'ok', payload };
+  });
 }
 
 async function handleRoads(
@@ -549,21 +669,44 @@ async function handleRoads(
     res.status(400).json({ error: 'invalid_bbox' });
     return;
   }
-  const bbox = rawBbox as [number, number, number, number];
-  const key = roadsCacheKey(bbox);
+  const requested = rawBbox as [number, number, number, number];
 
-  const cached = await cacheGet<CompactRoad[]>(key, ROADS_FRESH_TTL);
-  if (cached?.fresh) {
-    res.status(200).json({ roads: cached.value, cached: true });
+  /**
+   * Start from whatever window last worked for this request, so a megacity that needed three
+   * shrinking attempts does not pay for them again on every later visit.
+   */
+  const memo = await cacheGet<[number, number, number, number]>(
+    effectiveCacheKey(requested),
+    ROADS_FRESH_TTL,
+  );
+  const start = memo?.fresh ? memo.value : requested;
+  const windows = candidateWindows(start);
+
+  // A known-good window with its roads still cached answers without touching the rate limit or
+  // Overpass. Only a genuine miss falls through to the limiter.
+  const known = await cacheGet<RoadsPayload>(roadsCacheKey(windows[0]), ROADS_FRESH_TTL);
+  if (known?.fresh) {
+    res.status(200).json({
+      roads: known.value.roads,
+      bbox: windows[0],
+      truncated: known.value.truncated,
+      cached: true,
+    });
     return;
   }
 
   const rl = await rateLimited(ip, REQUESTS_PER_HOUR);
   if (rl.limited) {
     // Serve a stale copy rather than breaking the core feature for a returning visitor.
-    if (cached) {
+    if (known) {
       res.setHeader('Retry-After', String(Math.ceil(rl.retryAfter)));
-      res.status(200).json({ roads: cached.value, cached: true, stale: true });
+      res.status(200).json({
+        roads: known.value.roads,
+        bbox: windows[0],
+        truncated: known.value.truncated,
+        cached: true,
+        stale: true,
+      });
       return;
     }
     res.setHeader('Retry-After', String(Math.ceil(rl.retryAfter)));
@@ -571,32 +714,59 @@ async function handleRoads(
     return;
   }
 
-  try {
-    let truncated = false;
-    const roads = await singleFlight(key, async () => {
-      const again = await cacheGet<CompactRoad[]>(key, ROADS_FRESH_TTL);
-      if (again?.fresh) return again.value;
-      const data = await fetchOverpass(buildRoadsQuery(bbox));
-      const { roads: list, truncated: cut, remark } = transformRoads(data);
+  const failures: string[] = [];
+  for (let i = 0; i < windows.length; i++) {
+    const window = windows[i];
+    const isLast = i === windows.length - 1;
 
-      // A query Overpass could not finish is not a city with no roads. Caching either would poison
-      // the entry for 7 days fresh and 30 days stale, and the visitor is told to pick a different
-      // city when in fact a retry would have worked. Only a clean, non-empty result is cacheable.
-      if (remark) throw new Error(`overpass: ${remark}`);
-      if (list.length === 0) throw new Error('overpass: no road elements in this area');
-      if (cut) {
-        truncated = true;
-        console.warn(`geo: truncated map at ${list.length} ways for bbox ${bbox.join(',')}`);
-      }
+    let outcome: WindowOutcome;
+    try {
+      outcome = await fetchWindow(window);
+    } catch (err) {
+      // Every mirror failed for this window. A narrower query is cheaper, so try one before
+      // giving up rather than reporting the whole area as unavailable.
+      failures.push(`${bboxId(window)}=${err instanceof Error ? err.message : 'error'}`);
+      continue;
+    }
 
-      await cacheSet(key, list, ROADS_FRESH_TTL, ROADS_STALE_TTL);
-      return list;
+    if (outcome.kind === 'empty') {
+      // Terminal. This is not a city without roads that a smaller window would rescue — the
+      // window already covers it — so the honest answer is that we could not map this place.
+      console.error(`geo: no road elements for bbox ${bboxId(window)}`);
+      res.status(503).json({ error: 'upstream_unavailable' });
+      return;
+    }
+
+    if (outcome.kind === 'tooBig') {
+      failures.push(`${bboxId(window)}=too-big`);
+      continue;
+    }
+
+    // Truncation above the floor means the payload hit our own way/point ceiling, so this window
+    // is showing an incomplete network — the same problem as a remark, just detected on our side
+    // rather than Overpass's. Shrinking is what turns a partial map into an exact one. At the floor
+    // there is nowhere left to shrink, and an honestly-flagged short map still beats failing the
+    // city outright.
+    if (outcome.payload.truncated && !isLast) {
+      failures.push(`${bboxId(window)}=truncated`);
+      continue;
+    }
+
+    if (bboxId(window) !== bboxId(requested)) {
+      await cacheSet(effectiveCacheKey(requested), window, ROADS_FRESH_TTL, ROADS_STALE_TTL);
+    }
+
+    res.status(200).json({
+      roads: outcome.payload.roads,
+      bbox: window,
+      truncated: outcome.payload.truncated,
+      cached: false,
     });
-    res.status(200).json({ roads, cached: false, truncated });
-  } catch (err) {
-    console.error('geo roads failed:', err instanceof Error ? err.message : err);
-    res.status(503).json({ error: 'upstream_unavailable' });
+    return;
   }
+
+  console.error(`geo roads failed for ${bboxId(requested)}: ${failures.join(' ')}`);
+  res.status(503).json({ error: 'upstream_unavailable' });
 }
 
 async function handleSearch(
@@ -610,11 +780,13 @@ async function handleSearch(
     return;
   }
 
-  // v3: the v2 entries were written by an older deploy whose clamp was 0.25, and warm instances
-  // running that deploy keep re-populating the shared cache with those stale bboxes. Deleting the
-  // keys cannot win that race; a new prefix means old and new code write to different keys and
-  // cannot interfere. The orphaned v2 entries expire on their own.
-  const key = `geo:search:v3:${q.toLowerCase()}`;
+  // v4: the v3 entries carry the old fixed 0.05° clamp, which shrank every oversized city — Tokyo,
+  // Moscow and the rest of the megacities — to a 5 km centre crop no matter how much more the map
+  // could actually show. Search results are cached for 30 days fresh and 90 stale, so leaving the
+  // prefix alone would have kept serving those small boxes to exactly the cities this change
+  // exists to improve. Warm instances still running an older deploy cannot win that race either,
+  // so a new prefix is the only way to guarantee old and new code write to different keys.
+  const key = `geo:search:v4:${q.toLowerCase()}`;
   const cached = await cacheGet<City[]>(key, SEARCH_FRESH_TTL);
   if (cached?.fresh) {
     res.status(200).json({ cities: cached.value, cached: true });

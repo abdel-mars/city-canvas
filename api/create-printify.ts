@@ -493,7 +493,7 @@ async function createAndPublish(
     body: JSON.stringify({
       // Matches the JPEG the client now sends (generatePrintArtworkBase64). Measured against the
       // live API: a mismatched extension is accepted, so this is hygiene, not a fix.
-      file_name: `citylines-${opts.tag.replace(/^cl-/, '')}.jpg`,
+      file_name: `citylines-${opts.tag.replace(/^cl\d*-/, '')}.jpg`,
       contents: opts.imageBase64,
     }),
   });
@@ -634,7 +634,16 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
     return;
   }
 
-  const tag = `cl-${body.design_hash}`;
+  /**
+   * The Printify listing tag, and therefore the dedupe identity of a poster.
+   *
+   * v2 prefix: `designHash` now folds in the city's displayName and bounding box, so two different
+   * maps can no longer share a hash. Existing `cl-<hash>` listings were keyed on the name alone,
+   * which means some of them are the wrong artwork for their tag — matching them would sell the
+   * buyer a map of another city. A new prefix cannot collide with them, so those listings are
+   * simply orphaned and new, correct products are created.
+   */
+  const tag = `cl2-${body.design_hash}`;
 
   // ── Tier 2/3: dedupe. A repeat click is served here and is never charged a creation.
   let scan: ScanResult = { match: null, costByVariantId: new Map() };

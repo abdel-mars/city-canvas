@@ -21,6 +21,14 @@ interface DownloadShareProps {
   svgRef: React.RefObject<SVGSVGElement | null>;
   /** The full city: a gift link carries the bounding box so the poster can be re-rendered. */
   city: City;
+  /**
+   * The window actually drawn, when smaller than the city's own extent.
+   *
+   * Carried into the gift link so the recipient gets this poster rather than whatever the same
+   * city name resolves to next time — a different crop is a different map, and it would still be
+   * captioned with the same city.
+   */
+  bbox?: [number, number, number, number];
   settings: ArtworkSettings;
   textColor: string;
   onTransparentChange: (value: boolean) => void;
@@ -32,7 +40,7 @@ const FORMAT_OPTIONS: { id: ExportFormat; label: string }[] = [
   { id: 'svg', label: 'SVG' },
 ];
 
-const DownloadShare = ({ svgRef, city, settings, textColor, onTransparentChange }: DownloadShareProps) => {
+const DownloadShare = ({ svgRef, city, bbox, settings, textColor, onTransparentChange }: DownloadShareProps) => {
   const [format, setFormat] = useState<ExportFormat>('png');
   const [isDownloading, setIsDownloading] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -57,7 +65,8 @@ const DownloadShare = ({ svgRef, city, settings, textColor, onTransparentChange 
    */
   const handleConfirmGift = () => {
     setConfirmOpen(false);
-    window.open(giftUrl(city, settings), '_blank', 'noopener,noreferrer');
+    // Record the window that was drawn, not the one that was requested.
+    window.open(giftUrl({ ...city, boundingBox: bbox ?? city.boundingBox }, settings), '_blank', 'noopener,noreferrer');
   };
 
   const handleDownload = async () => {

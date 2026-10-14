@@ -10,6 +10,15 @@ interface ArtworkCanvasProps {
   roads: Road[];
   settings: ArtworkSettings;
   isLoading: boolean;
+  /**
+   * The window to draw, defaulting to the city's own extent.
+   *
+   * The proxy may shrink a request when Overpass cannot carry it, and the roads then cover only
+   * that smaller window. Projecting them against `city.boundingBox` would scale the whole network
+   * down into a corner of the canvas and place it nowhere near where those streets belong, so the
+   * effective window has to travel with the roads.
+   */
+  bbox?: [number, number, number, number];
   transparent?: boolean;
   /** Any CSS size expression. Defaults to the creator's viewport-relative fit. */
   size?: string;
@@ -36,17 +45,17 @@ const FRAMED_SHADOW =
   '0 28px 70px -14px rgba(0,0,0,0.30), 0 10px 24px -8px rgba(0,0,0,0.16)';
 
 const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
-  ({ city, roads, settings, isLoading, transparent = false, size, frame = false, label }, ref) => {
+  ({ city, roads, settings, isLoading, bbox, transparent = false, size, frame = false, label }, ref) => {
     const { background, road, text, font, textPositionY, customName, showCustomName, preset } = settings;
 
     const project = useMemo(() => {
       return createProjection({
-        bbox: city.boundingBox,
+        bbox: bbox ?? city.boundingBox,
         width: CANVAS_SIZE,
         height: CANVAS_SIZE,
         padding: PADDING,
       });
-    }, [city.boundingBox]);
+    }, [bbox, city.boundingBox]);
 
     const groupedPaths = useMemo(() => {
       const groups: Record<number, string[]> = {};

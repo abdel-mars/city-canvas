@@ -66,7 +66,7 @@ const GiftPage = () => {
   // `error` is the geo failure; the local `error` below is for the purchase. Conflating them, or
   // forgetting to read this one, is how a gift link for an unrenderable area ends up as a blank
   // poster with no explanation.
-  const { roads, isLoading, error: geoError, loadRoads } = useRoadData();
+  const { roads, bbox, isLoading, error: geoError, loadRoads } = useRoadData();
   const svgRef = useRef<SVGSVGElement>(null);
 
   const [variants, setVariants] = useState<PosterVariant[] | null>(null);
@@ -143,7 +143,7 @@ const GiftPage = () => {
       const payload = {
         image_base64: await generatePrintArtworkBase64(svgRef.current, 5),
         city_name: city.name,
-        design_hash: designHash(city.name, settings),
+        design_hash: designHash(city.name, settings, city),
       };
 
       let url: string | null = null;
@@ -276,6 +276,7 @@ const GiftPage = () => {
             ref={svgRef}
             city={city}
             roads={roads}
+            bbox={bbox ?? undefined}
             settings={settings}
             isLoading={isLoading}
             size="var(--gift-art-size)"

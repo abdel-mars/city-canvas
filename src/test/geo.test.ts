@@ -238,10 +238,14 @@ describe('transformRoads', () => {
       expect(clampBbox(lisbon, 38.72, -9.14)).toEqual(lisbon);
     });
 
-    it('crops an oversized box to a window on the centre', () => {
+    it('crops an oversized box to the widest window the proxy will accept', () => {
+      // Deliberately the maximum, not a conservative guess. Whether Overpass can actually carry
+      // 0.35° is a per-question answer that handleRoads discovers by trying and shrinking, and it
+      // reports back the window it used. Hard-coding a small crop here instead threw away real
+      // area for every city that could have shown more.
       const out = clampBbox(moscow, 55.7558, 37.6173);
-      expect(out[2] - out[0]).toBeCloseTo(0.05, 6);
-      expect(out[3] - out[1]).toBeCloseTo(0.05, 6);
+      expect(out[2] - out[0]).toBeCloseTo(0.35, 3);
+      expect(out[3] - out[1]).toBeCloseTo(0.35, 3);
       // Centred on the point Nominatim gave us, not on the original box's corner.
       expect((out[0] + out[2]) / 2).toBeCloseTo(55.7558, 6);
       expect((out[1] + out[3]) / 2).toBeCloseTo(37.6173, 6);
@@ -313,8 +317,7 @@ describe('toCity', () => {
     expect(toCity({ display_name: 'x', lat: 'a', lon: 'b', boundingbox: [] })).toBeNull();
     expect(toCity({ display_name: 'x', lat: '1', lon: '2' })).toBeNull();
   });
-
-  it('clamps a metro-sized result so it can actually be rendered', () => {
+it('clamps a metro-sized result so it can actually be rendered', () => {
     // This is the real Nominatim payload for "Moscow": the whole metro region, 0.88 x 1.16.
     // Before clamping, picking it from the dropdown produced a 400 and the message
     // "choose a smaller city".
@@ -330,8 +333,9 @@ describe('toCity', () => {
     expect(city).not.toBeNull();
     expect(isValidBbox(city!.boundingBox)).toBe(true);
     const [s, w, n, e] = city!.boundingBox;
-    expect(n - s).toBeCloseTo(0.05, 6);
-    expect(e - w).toBeCloseTo(0.05, 6);
+    // The widest window we will ask for; handleRoads shrinks from here only if Overpass refuses.
+    expect(n - s).toBeCloseTo(0.35, 3);
+    expect(e - w).toBeCloseTo(0.35, 3);
   });
 
   it('clamps a whole prefecture, where only one result exists', () => {
@@ -344,8 +348,13 @@ describe('toCity', () => {
       lon: '139.6503',
       boundingbox: ['34.8343', '36.5185', '130.4743', '148.8263'],
     } as never);
+
     expect(city).not.toBeNull();
     expect(isValidBbox(city!.boundingBox)).toBe(true);
+    // Centred on the city, not on the prefecture's bounding-box midpoint — which for Tokyo would
+    // land in the sea, south of the metro area.
+    expect((city!.boundingBox[0] + city!.boundingBox[2]) / 2).toBeCloseTo(35.6762, 3);
+    expect((city!.boundingBox[1] + city!.boundingBox[3]) / 2).toBeCloseTo(139.6503, 3);
   });
 });
 
@@ -541,7 +550,9 @@ describe('geo endpoint', () => {
       let attempt = 0;
       mockFetch(() => {
         attempt++;
-        if (attempt === 1) return emptyUpstream('runtime error: Query timed out')();
+        // Two refusals exhaust both windows of a 0.1° request, so the first call genuinely
+        // exhausts its options rather than falling through to a narrower one that happens to work.
+        if (attempt <= 2) return emptyUpstream('runtime error: Query timed out')();
         return new Response(
           JSON.stringify({
             elements: [
@@ -566,6 +577,131 @@ describe('geo endpoint', () => {
       const retry = await call(geoHandler, { kind: 'roads', bbox });
       expect(retry.status).toBe(200);
       expect((retry.body as { roads: unknown[] }).roads).toHaveLength(1);
+    });
+
+    it('shrinks a window Overpass refuses instead of failing the city', async () => {
+      // The regression this guards: a megacity was clamped at search time to a fixed 0.05° window
+      // precisely because a wider query was refused. Now the proxy starts wide and walks inward
+      // until Overpass answers, so a city gets the largest window it can actually have.
+      const seen: string[] = [];
+      mockFetch((url) => {
+        seen.push(url);
+        // Overpass OOMs on the two widest windows, then serves the third.
+        if (seen.length < 3) return emptyUpstream('runtime error: Query exceeded the maximum size')();
+        return new Response(
+          JSON.stringify({
+            elements: [
+              {
+                type: 'way',
+                id: 9,
+                tags: { highway: 'residential' },
+                geometry: [
+                  { lat: 35.68, lon: 139.76 },
+                  { lat: 35.681, lon: 139.761 },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      });
+
+      // 0.2° gives three windows: 0.2, 0.1, 0.05.
+      const res = await call(geoHandler, { kind: 'roads', bbox: [35.575, 139.675, 35.775, 139.875] });
+      expect(res.status).toBe(200);
+      expect(seen).toHaveLength(3);
+      expect((res.body as { roads: unknown[] }).roads).toHaveLength(1);
+
+      const body = res.body as { bbox: number[] };
+      // The answer is reported as the window that actually worked — the 0.05° floor here, which is
+      // what the projection must use or the map would be drawn tiny in the corner of the canvas.
+      expect(body.bbox).toBeDefined();
+      expect(body.bbox[2] - body.bbox[0]).toBeCloseTo(0.05, 4);
+      expect(body.bbox[3] - body.bbox[1]).toBeCloseTo(0.05, 4);
+      // Centred on the city that was asked for.
+      expect((body.bbox[0] + body.bbox[2]) / 2).toBeCloseTo(35.675, 3);
+      expect((body.bbox[1] + body.bbox[3]) / 2).toBeCloseTo(139.775, 3);
+    });
+
+    it('remembers the window that worked, so later visits skip the failed wide queries', async () => {
+      let calls = 0;
+      mockFetch(() => {
+        calls++;
+        if (calls < 3) return emptyUpstream('runtime error: Query exceeded the maximum size')();
+        return new Response(
+          JSON.stringify({
+            elements: [
+              {
+                type: 'way',
+                id: 4,
+                tags: { highway: 'primary' },
+                geometry: [
+                  { lat: 48.8, lon: 2.3 },
+                  { lat: 48.81, lon: 2.31 },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      });
+
+      const bbox = [48.67, 2.23, 48.87, 2.43];
+      const first = await call(geoHandler, { kind: 'roads', bbox });
+      expect(first.status).toBe(200);
+      expect(calls).toBe(3);
+
+      const second = await call(geoHandler, { kind: 'roads', bbox });
+      expect(second.status).toBe(200);
+      // No further upstream traffic at all: the request goes straight to the window that worked.
+      expect(calls).toBe(3);
+      expect((second.body as { cached: boolean }).cached).toBe(true);
+      // The reported window is stable across visits, so the poster does not change size.
+      expect((second.body as { bbox: number[] }).bbox).toEqual(
+        (first.body as { bbox: number[] }).bbox,
+      );
+    });
+
+    it('does not retry a window that is simply roadless', async () => {
+      // Shrinking a subset of an empty area cannot produce roads, so this must fail in one call
+      // rather than spending the visitor's rate-limit budget rediscovering the same absence.
+      let calls = 0;
+      mockFetch(() => {
+        calls++;
+        return emptyUpstream()();
+      });
+
+      const res = await call(geoHandler, { kind: 'roads', bbox: [-12.0, 44.0, -11.95, 44.05] });
+      expect(res.status).toBe(503);
+      expect(calls).toBe(1);
+    });
+
+    it('reports an effective bbox on every successful response', async () => {
+      // The client projects with this. Without it the roads would be drawn against the requested
+      // box and shrink into a corner, misrepresenting where the streets actually are.
+      mockFetch(() =>
+        new Response(
+          JSON.stringify({
+            elements: [
+              {
+                type: 'way',
+                id: 1,
+                tags: { highway: 'primary' },
+                geometry: [
+                  { lat: 38.7, lon: -9.1 },
+                  { lat: 38.71, lon: -9.11 },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+      const bbox = [38.7, -9.15, 38.75, -9.1];
+      const res = await call(geoHandler, { kind: 'roads', bbox });
+      expect(res.status).toBe(200);
+      // A fitting city is asked for at its own extent, so the answer is the box that went in.
+      expect((res.body as { bbox: number[] }).bbox).toEqual(bbox);
     });
 
     it('exposes whether a map was cut short', async () => {

@@ -32,7 +32,7 @@ const Index = () => {
   });
 
   const [transparent, setTransparent] = useState(false);
-  const { roads, isLoading, error, loadRoads } = useRoadData();
+  const { roads, bbox, isLoading, error, loadRoads } = useRoadData();
   const svgRef = useRef<SVGSVGElement>(null);
 
   const handleTransparentChange = useCallback((value: boolean) => {
@@ -156,6 +156,7 @@ const Index = () => {
                   ref={svgRef}
                   city={selectedCity}
                   roads={roads}
+                  bbox={bbox ?? undefined}
                   settings={settings}
                   isLoading={isLoading}
                   transparent={transparent}
@@ -181,6 +182,7 @@ const Index = () => {
                   onSettingsChange={setSettings}
                   svgRef={svgRef}
                   city={selectedCity}
+                  bbox={bbox ?? undefined}
                   hasRoads={roads.length > 0}
                   onTransparentChange={handleTransparentChange}
                 />
