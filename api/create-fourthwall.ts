@@ -290,7 +290,7 @@ function productDescription(spec: ProductSpec): string {
       `<p>Part of <em>City Lines</em>, a visual collection exploring the identity of cities around the world through minimalist line art.</p>`,
       `<p>One city. Countless lines. A place worth framing.</p>`,
       token,
-    ].join('\\n');
+    ].join('\n');
   }
   const stickerIntro = spec.kind === 'sticker-sheet'
     ? 'presented as a sheet of kiss-cut stickers of varying sizes.'
@@ -301,7 +301,7 @@ function productDescription(spec: ProductSpec): string {
     `<p>Part of <em>City Lines</em>, a visual collection exploring the identity of cities around the world through minimalist line art.</p>`,
     `<p>One city. Countless lines. Take your city with you.</p>`,
     token,
-  ].join('\\n');
+  ].join('\n');
 }
 
 async function createDesignProduct(env: Env, imageId: string, spec: ProductSpec): Promise<CreatedProduct> {

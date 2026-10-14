@@ -37,24 +37,6 @@ const fade = (delay: number) => ({
   transition: { delay, duration: 0.6, ease: 'easeOut' as const },
 });
 
-/**
- * Fill the pre-opened tab while Printify creates the product.
- *
- * `about:blank` inherits the opener's origin, so this document is ours to write to. Without it the
- * buyer stares at a blank white tab for the 5-15s the upload, create, publish and poll take, which
- * reads as a crash rather than a wait.
- */
-function showPreparing(tab: Window) {
-  const doc = tab.document;
-  doc.title = 'Preparing your poster…';
-  doc.body.style.cssText =
-    'margin:0;min-height:100vh;display:grid;place-items:center;background:#111;color:#f4f4f5;' +
-    'font:15px/1.6 "DM Sans",system-ui,sans-serif;text-align:center;padding:2rem';
-  doc.body.innerHTML =
-    '<div><p style="font-family:Georgia,serif;font-size:30px;margin:0 0 10px">Preparing your poster…</p>' +
-    '<p style="opacity:.6;margin:0">Creating your print on Fourthwall</p></div>';
-}
-
 const GiftPage = () => {
   const [params] = useSearchParams();
   useNoindex();
@@ -130,19 +112,9 @@ const GiftPage = () => {
   const openPurchase = useCallback(async () => {
     if (!city || !settings || !svgRef.current || phase !== 'idle') return;
 
-    /**
-     * Opened as the first statement, while the click is still the gesture. A `window.open` after
-     * the awaits below would be blocked as a popup and the button would appear to do nothing.
-     * The tab is written to and navigated only once Printify has answered.
-     */
-    const tab = window.open('', '_blank');
-    const closeTab = () => tab?.close();
-    if (tab) showPreparing(tab);
-
     setPhase('preparing');
     setError(null);
     const fail = (message: string) => {
-      closeTab();
       setError(message);
       setPhase('idle');
     };
@@ -168,7 +140,7 @@ const GiftPage = () => {
           const data = await res.json();
           url = data?.product_url ?? null;
           // The create path re-derives prices from the same harvested costs as this page, so
-          // prefer them: never show a figure Printify's checkout is about to contradict.
+          // prefer them: never show a figure Fourthwall's checkout is about to contradict.
           if (Array.isArray(data?.variants) && data.variants.length > 0) {
             setVariants(data.variants);
             if (data.currency) setCurrency(data.currency);
@@ -212,15 +184,11 @@ const GiftPage = () => {
         return;
       }
 
-      if (tab) {
-        tab.location.href = url;
-      } else {
-        // No tab means the popup was blocked; fall back so the click still completes the sale.
-        window.open(url, '_blank', 'noopener,noreferrer');
-      }
+      // Hand the visitor to Fourthwall in this same tab: the poster preview they are looking at
+      // becomes the product page once the print exists, so there is no second tab to lose track of.
+      window.location.href = url;
     } catch (e) {
       console.error('gift purchase failed:', e);
-      closeTab();
       setError('Something went wrong. Please try again.');
       setPhase('idle');
     }
@@ -355,7 +323,7 @@ const GiftPage = () => {
         </motion.div>
 
         <motion.p {...fade(1)} className="mt-4 text-[13px] text-muted-foreground max-w-sm">
-          Opens on Fourthwall, where checkout, printing and shipping are handled.
+          You'll continue on Fourthwall, where checkout, printing and shipping are handled.
         </motion.p>
 
         {error && (
