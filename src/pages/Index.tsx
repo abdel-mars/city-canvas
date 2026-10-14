@@ -179,7 +179,7 @@ const Index = () => {
               {/* Artwork area */}
               <main
                 ref={mainRef}
-                className="flex-1 flex flex-col relative overflow-hidden"
+                className="flex-1 relative overflow-hidden"
                 style={
                   transparent
                     ? {
@@ -192,8 +192,8 @@ const Index = () => {
                 }
               >
                 <div
-                  className="flex-1 flex items-center justify-center min-h-0 p-0"
-                  style={{ touchAction: 'none' }}
+                  className="absolute inset-0 flex items-center justify-center"
+                  style={{ touchAction: 'none', overflow: 'hidden' }}
                 >
                   <div
                     style={{
