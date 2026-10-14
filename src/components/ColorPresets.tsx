@@ -1,5 +1,4 @@
 import { motion } from 'framer-motion';
-import { Lock } from 'lucide-react';
 import { ColorPreset } from '@/types/artwork';
 import { colorPresets } from '@/lib/presets';
 import {
@@ -19,6 +18,8 @@ interface ColorPresetsProps {
   onTextChange: (color: string) => void;
 }
 
+const visiblePresets = colorPresets.filter((p) => p.name !== 'Mars');
+
 const ColorPresets = ({
   selected,
   onSelect,
@@ -35,13 +36,28 @@ const ColorPresets = ({
         Mood
       </span>
       <div className="flex gap-3 flex-wrap">
-        {colorPresets.map((preset) => (
+        {visiblePresets.map((preset) => (
           <Tooltip key={preset.name}>
             <TooltipTrigger asChild>
               <button
                 onClick={() => onSelect(preset)}
-                className="group relative"
+                className="group relative p-1"
               >
+                {preset.isNeon && (
+                  <motion.span
+                    aria-hidden
+                    className="absolute inset-0 rounded-full pointer-events-none"
+                    style={{ boxShadow: `0 0 0 0 ${preset.road}` }}
+                    animate={{
+                      boxShadow: [
+                        `0 0 0 0 ${preset.road}00`,
+                        `0 0 0 10px ${preset.road}33`,
+                        `0 0 0 0 ${preset.road}00`,
+                      ],
+                    }}
+                    transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+                )}
                 <motion.div
                   className={`w-10 h-10 rounded-full overflow-hidden flex border-2 transition-colors duration-200 ${
                     selected.name === preset.name
@@ -55,9 +71,6 @@ const ColorPresets = ({
                   <div className="w-1/2 h-full" style={{ backgroundColor: preset.background }} />
                   <div className="w-1/2 h-full" style={{ backgroundColor: preset.road }} />
                 </motion.div>
-                {preset.isNeon && (
-                  <Lock className="absolute -top-1 -right-1 w-3 h-3 text-muted-foreground/60" />
-                )}
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">
