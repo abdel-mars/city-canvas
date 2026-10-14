@@ -22,7 +22,7 @@ export type GiftDecodeError =
   | 'bounding-box'
   | 'colors'
   | 'font'
-  | 'position';
+  | 'position' | 'size';
 
 export interface GiftDesign {
   city: City;
@@ -79,6 +79,7 @@ export function encodeGiftParams(city: City, settings: ArtworkSettings): URLSear
   params.set('text', settings.text);
   params.set('font', settings.font);
   params.set('y', String(settings.textPositionY));
+  params.set('s', String(settings.textSize));
   params.set('name', settings.customName);
   params.set('show', settings.showCustomName ? '1' : '0');
   // Recorded so a Neon poster keeps its glow; harmless when the colours are custom.
@@ -124,6 +125,12 @@ export function decodeGiftParams(input: URLSearchParams | string): GiftDecodeOut
     return { ok: false, error: 'position' };
   }
 
+  const textSizeParam = num(params.get('s'));
+  const textSize = textSizeParam === null ? 50 : textSizeParam;
+  if (textSize < 0 || textSize > 100) {
+    return { ok: false, error: 'size' };
+  }
+
   const displayName = (params.get('display') ?? '').trim();
   const countryParam = (params.get('country') ?? '').trim();
   let country = countryParam;
@@ -151,6 +158,7 @@ export function decodeGiftParams(input: URLSearchParams | string): GiftDecodeOut
     text,
     font,
     textPositionY,
+    textSize,
     // The server pattern-checks this before it ever reaches Printify.
     customName: CITY_RE.test(customName.trim()) ? customName.trim() : '',
     showCustomName,

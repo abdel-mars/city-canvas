@@ -5,10 +5,12 @@ import { fontLabels, fontMap } from '@/lib/presets';
 interface TypographyControlsProps {
   font: FontFamily;
   textPositionY: number;
+  textSize: number;
   customName: string;
   showCustomName: boolean;
   onFontChange: (font: FontFamily) => void;
   onPositionChange: (y: number) => void;
+  onSizeChange: (size: number) => void;
   onCustomNameChange: (name: string) => void;
   onShowCustomNameChange: (show: boolean) => void;
 }
@@ -18,10 +20,12 @@ const fonts: FontFamily[] = ['serif', 'sans', 'mono', 'handwritten'];
 const TypographyControls = ({
   font,
   textPositionY,
+  textSize,
   customName,
   showCustomName,
   onFontChange,
   onPositionChange,
+  onSizeChange,
   onCustomNameChange,
   onShowCustomNameChange,
 }: TypographyControlsProps) => {
@@ -66,6 +70,25 @@ const TypographyControls = ({
             className="flex-1 h-1.5 bg-secondary rounded-full appearance-none cursor-pointer accent-foreground [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground [&::-webkit-slider-thumb]:cursor-pointer"
           />
           <span className="text-[10px] text-muted-foreground/60">Bottom</span>
+        </div>
+      </div>
+
+      {/* Text size slider */}
+      <div className="space-y-3">
+        <span className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground font-medium">
+          Size
+        </span>
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] text-muted-foreground/60">Small</span>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            value={textSize}
+            onChange={(e) => onSizeChange(Number(e.target.value))}
+            className="flex-1 h-1.5 bg-secondary rounded-full appearance-none cursor-pointer accent-foreground [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground [&::-webkit-slider-thumb]:cursor-pointer"
+          />
+          <span className="text-[10px] text-muted-foreground/60">Large</span>
         </div>
       </div>
 

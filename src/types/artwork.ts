@@ -31,6 +31,7 @@ export interface ArtworkSettings {
   text: string;
   font: FontFamily;
   textPositionY: number; // 0–100
+  textSize: number; // 0–100
   customName: string;
   showCustomName: boolean;
 }

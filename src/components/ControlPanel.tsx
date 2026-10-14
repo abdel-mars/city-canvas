@@ -62,10 +62,12 @@ const ControlPanel = ({
       <TypographyControls
         font={settings.font}
         textPositionY={settings.textPositionY}
+        textSize={settings.textSize}
         customName={settings.customName}
         showCustomName={settings.showCustomName}
         onFontChange={(font: FontFamily) => update({ font })}
         onPositionChange={(textPositionY: number) => update({ textPositionY })}
+        onSizeChange={(textSize: number) => update({ textSize })}
         onCustomNameChange={(customName: string) => update({ customName })}
         onShowCustomNameChange={(showCustomName: boolean) => update({ showCustomName })}
       />

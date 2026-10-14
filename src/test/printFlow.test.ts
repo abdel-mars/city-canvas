@@ -10,6 +10,7 @@ const base: ArtworkSettings = {
   text: colorPresets[0].text,
   font: 'serif',
   textPositionY: 90,
+  textSize: 50,
   customName: '',
   showCustomName: false,
 };
@@ -33,6 +34,7 @@ describe('designHash', () => {
     ['text colour', { ...base, text: '#0000ff' }],
     ['font', { ...base, font: 'mono' as const }],
     ['text position', { ...base, textPositionY: 10 }],
+    ['text size', { ...base, textSize: 80 }],
     ['custom name', { ...base, customName: 'Porto' }],
     ['showCustomName', { ...base, showCustomName: true }],
   ])('changes when %s changes', (_label, next) => {

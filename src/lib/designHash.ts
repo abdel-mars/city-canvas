@@ -29,6 +29,7 @@ export function designHash(cityName: string, settings: ArtworkSettings, city?: C
     settings.text,
     settings.font,
     String(settings.textPositionY),
+    String(settings.textSize),
     settings.customName.trim(),
     settings.showCustomName ? '1' : '0',
   ];

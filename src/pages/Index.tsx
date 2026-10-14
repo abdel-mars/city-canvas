@@ -27,6 +27,7 @@ const Index = () => {
     text: colorPresets[0].text,
     font: 'serif',
     textPositionY: 90,
+    textSize: 50,
     customName: '',
     showCustomName: false,
   });

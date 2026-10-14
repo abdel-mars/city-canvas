@@ -46,7 +46,7 @@ const FRAMED_SHADOW =
 
 const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
   ({ city, roads, settings, isLoading, bbox, transparent = false, size, frame = false, label }, ref) => {
-    const { background, road, text, font, textPositionY, customName, showCustomName, preset } = settings;
+    const { background, road, text, font, textPositionY, textSize, customName, showCustomName, preset } = settings;
 
     const project = useMemo(() => {
       return createProjection({
@@ -88,7 +88,9 @@ const ArtworkCanvas = forwardRef<SVGSVGElement, ArtworkCanvasProps>(
     const displayText =
       showCustomName && customName ? `City of ${customName}` : city.name;
 
-    const fontSize = font === 'handwritten' ? 32 : 22;
+    const sizeFactor = 0.5 + textSize / 100;
+    const baseFontSize = font === 'handwritten' ? 32 : 22;
+    const fontSize = Math.round(baseFontSize * sizeFactor);
     const letterSpacing = font === 'mono' ? 6 : font === 'sans' ? 4 : 2;
 
     // Show skeleton while loading (no roads yet)
