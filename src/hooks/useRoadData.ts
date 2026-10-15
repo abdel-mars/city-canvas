@@ -52,6 +52,7 @@ const EMPTY: RoadData = {
 
 export function useRoadData() {
   const [data, setData] = useState<RoadData>(EMPTY);
+  const lastCityRef = useRef<City | null>(null);
 
   /**
    * Guards against out-of-order responses.
@@ -74,6 +75,7 @@ export function useRoadData() {
   }, []);
 
   const loadRoads = useCallback(async (city: City) => {
+    lastCityRef.current = city;
     const token = ++requestRef.current;
     const isCurrent = () => token === requestRef.current;
 
@@ -138,6 +140,11 @@ export function useRoadData() {
     }
   }, []);
 
+  const retry = useCallback(async () => {
+    const city = lastCityRef.current;
+    if (city) await loadRoads(city);
+  }, [loadRoads]);
+
   return {
     roads: data.roads,
     bbox: data.bbox,
@@ -145,5 +152,6 @@ export function useRoadData() {
     isLoading: data.isLoading,
     error: data.error,
     loadRoads,
+    retry,
   };
 }

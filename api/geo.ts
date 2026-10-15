@@ -65,6 +65,9 @@ const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
 // full 25s before failing over. A busy mirror is still busy 8s later, so fail over quickly.
 const UPSTREAM_TIMEOUT_MS = 8_000;
 const NOMINATIM_TIMEOUT_MS = 12_000;
+const ROADS_TIME_BUDGET_MS = 30_000;
+const ROADS_SHORT_BUDGET_MS = 12_000;
+const MIRROR_COOLDOWN_MS = 60_000;
 
 const EPSILON = 0.00005; // ~5 m at the equator
 const MAX_WAYS = 12_000;
@@ -197,18 +200,45 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
-/** Remembers the mirror that last worked so we stop re-probing known-dead hosts every request. */
-let preferredMirror: string | null = null;
+/**
+ * Mirror health tracking: a mirror that timed out or answered 429/502/503/504 is skipped for a
+ * minute, so a later request does not burn its own budget re-probing a host we already watched
+ * fail. Only skipped while some healthy mirror remains — if every mirror is cooling, trying them
+ * all is still better than refusing outright.
+ */
+const mirrorCooldownUntil = new Map<string, number>();
+let lastGoodMirror: string | null = null;
 
 function mirrorOrder(): string[] {
-  if (!preferredMirror) return OVERPASS_MIRRORS;
-  return [preferredMirror, ...OVERPASS_MIRRORS.filter((m) => m !== preferredMirror)];
+  const now = Date.now();
+  const healthy: string[] = [];
+  const cooled: string[] = [];
+  for (const m of OVERPASS_MIRRORS) {
+    const until = mirrorCooldownUntil.get(m);
+    if (until !== undefined && until > now) cooled.push(m);
+    else healthy.push(m);
+  }
+  if (healthy.length > 0) return healthy;
+  return OVERPASS_MIRRORS;
 }
 
-async function fetchOverpass(query: string): Promise<unknown> {
+export function resetOverpassState(): void {
+  mirrorCooldownUntil.clear();
+  lastGoodMirror = null;
+}
+
+async function fetchOverpass(query: string, deadline?: number): Promise<unknown> {
   const failures: string[] = [];
+  if (deadline !== undefined && Date.now() >= deadline) {
+    throw new Error('overpass budget exhausted');
+  }
 
   for (const mirror of mirrorOrder()) {
+    const remaining = deadline === undefined ? UPSTREAM_TIMEOUT_MS : deadline - Date.now();
+    if (remaining <= 0) {
+      failures.push('budget-exhausted');
+      break;
+    }
     try {
       const res = await fetchWithTimeout(
         mirror,
@@ -220,22 +250,27 @@ async function fetchOverpass(query: string): Promise<unknown> {
           },
           body: `data=${encodeURIComponent(query)}`,
         },
-        UPSTREAM_TIMEOUT_MS,
+        Math.min(UPSTREAM_TIMEOUT_MS, remaining),
       );
 
       if (!res.ok) {
         failures.push(`${hostOf(mirror)}=${res.status}`);
+        if (res.status === 429 || res.status === 502 || res.status === 503 || res.status === 504) {
+          mirrorCooldownUntil.set(mirror, Date.now() + MIRROR_COOLDOWN_MS);
+        }
         continue;
       }
 
       const data = (await res.json()) as unknown;
-      if (preferredMirror !== mirror) {
+      mirrorCooldownUntil.delete(mirror);
+      if (lastGoodMirror !== mirror) {
         console.log(`overpass: preferred mirror is now ${hostOf(mirror)}`);
+        lastGoodMirror = mirror;
       }
-      preferredMirror = mirror;
       return data;
     } catch (err) {
       failures.push(`${hostOf(mirror)}=${err instanceof Error ? err.message : 'error'}`);
+      mirrorCooldownUntil.set(mirror, Date.now() + MIRROR_COOLDOWN_MS);
     }
   }
 
@@ -634,7 +669,7 @@ type WindowOutcome =
  * mirror and worth retrying later, and an empty result must not pin a city to "no roads" for the
  * 7-day fresh and 30-day stale windows the cache allows.
  */
-async function fetchWindow(bbox: [number, number, number, number]): Promise<WindowOutcome> {
+async function fetchWindow(bbox: [number, number, number, number], deadline?: number): Promise<WindowOutcome> {
   const key = roadsCacheKey(bbox);
 
   const cached = await cacheGet<RoadsPayload>(key, ROADS_FRESH_TTL);
@@ -644,7 +679,7 @@ async function fetchWindow(bbox: [number, number, number, number]): Promise<Wind
     const again = await cacheGet<RoadsPayload>(key, ROADS_FRESH_TTL);
     if (again?.fresh) return { kind: 'ok', payload: again.value };
 
-    const data = await fetchOverpass(buildRoadsQuery(bbox));
+    const data = await fetchOverpass(buildRoadsQuery(bbox), deadline);
     const { roads: list, truncated, remark } = transformRoads(data);
 
     // Overpass reports timeouts and maxsize overruns in a top-level remark while still answering
@@ -660,6 +695,48 @@ async function fetchWindow(bbox: [number, number, number, number]): Promise<Wind
     await cacheSet(key, payload, ROADS_FRESH_TTL, ROADS_STALE_TTL);
     return { kind: 'ok', payload };
   });
+}
+
+/**
+ * Last resort when Upstream is unreachable: any cached copy of these roads, however old, still
+ * beats a blank poster. Only called once every window has failed, so a fresh answer is never
+ * displaced by this. Returns true when a response was written.
+ */
+async function serveStaleIfPossible(
+  res: ApiResponse,
+  windows: [number, number, number, number][],
+  requested: [number, number, number, number],
+): Promise<boolean> {
+  const send = (win: [number, number, number, number], hit: CacheHit<RoadsPayload>) => {
+    res.status(200).json({
+      roads: hit.value.roads,
+      bbox: win,
+      truncated: hit.value.truncated,
+      cached: true,
+      stale: true,
+    });
+    return true;
+  };
+
+  for (const win of windows) {
+    const hit = await cacheGet<RoadsPayload>(roadsCacheKey(win), ROADS_STALE_TTL);
+    if (hit) {
+      if (bboxId(win) !== bboxId(requested)) {
+        await cacheSet(effectiveCacheKey(requested), win, ROADS_FRESH_TTL, ROADS_STALE_TTL);
+      }
+      return send(win, hit);
+    }
+  }
+
+  const memo = await cacheGet<[number, number, number, number]>(
+    effectiveCacheKey(requested),
+    ROADS_STALE_TTL,
+  );
+  if (memo) {
+    const hit = await cacheGet<RoadsPayload>(roadsCacheKey(memo.value), ROADS_STALE_TTL);
+    if (hit) return send(memo.value, hit);
+  }
+  return false;
 }
 
 async function handleRoads(
@@ -717,13 +794,20 @@ async function handleRoads(
   }
 
   const failures: string[] = [];
+  // A stale copy of this window exists, so the visitor has something to look at either way:
+  // try upstream briefly and then fall back, rather than making them wait out a full fan-out.
+  // With no cache at all this is their only chance at a map, so it gets the longer budget.
+  const budget = known && !known.fresh ? ROADS_SHORT_BUDGET_MS : ROADS_TIME_BUDGET_MS;
+  const deadline = Date.now() + budget;
+
   for (let i = 0; i < windows.length; i++) {
+    if (Date.now() > deadline) break;
     const window = windows[i];
     const isLast = i === windows.length - 1;
 
     let outcome: WindowOutcome;
     try {
-      outcome = await fetchWindow(window);
+      outcome = await fetchWindow(window, deadline);
     } catch (err) {
       // Every mirror failed for this window. A narrower query is cheaper, so try one before
       // giving up rather than reporting the whole area as unavailable.
@@ -733,9 +817,12 @@ async function handleRoads(
 
     if (outcome.kind === 'empty') {
       // Terminal. This is not a city without roads that a smaller window would rescue — the
-      // window already covers it — so the honest answer is that we could not map this place.
+      // window already covers it — so if we have no cached copy, the honest answer is that we
+      // could not map this place.
       console.error(`geo: no road elements for bbox ${bboxId(window)}`);
-      res.status(503).json({ error: 'upstream_unavailable' });
+      if (!(await serveStaleIfPossible(res, windows, requested))) {
+        res.status(503).json({ error: 'upstream_unavailable' });
+      }
       return;
     }
 
@@ -766,6 +853,9 @@ async function handleRoads(
     });
     return;
   }
+
+  // Budget spent or every window failed: hand back whatever we have before refusing.
+  if (await serveStaleIfPossible(res, windows, requested)) return;
 
   console.error(`geo roads failed for ${bboxId(requested)}: ${failures.join(' ')}`);
   res.status(503).json({ error: 'upstream_unavailable' });

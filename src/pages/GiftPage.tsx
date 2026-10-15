@@ -51,7 +51,7 @@ const GiftPage = () => {
   // `error` is the geo failure; the local `error` below is for the purchase. Conflating them, or
   // forgetting to read this one, is how a gift link for an unrenderable area ends up as a blank
   // poster with no explanation.
-  const { roads, bbox, isLoading, error: geoError, loadRoads } = useRoadData();
+  const { roads, bbox, isLoading, error: geoError, loadRoads, retry } = useRoadData();
   const svgRef = useRef<SVGSVGElement>(null);
 
   const [variants, setVariants] = useState<PosterVariant[] | null>(null);
@@ -234,14 +234,21 @@ const GiftPage = () => {
         </motion.p>
 
         {geoError && (
-          <motion.p
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             role="alert"
-            className="mt-4 max-w-sm text-[13px] text-destructive"
+            className="mt-4 flex max-w-sm flex-col items-center gap-3"
           >
-            {geoError}
-          </motion.p>
+            <p className="text-[13px] text-destructive">{geoError}</p>
+            <button
+              type="button"
+              onClick={() => void retry()}
+              className="rounded-lg border border-border bg-card/80 px-4 py-1.5 text-[13px] text-foreground transition-colors hover:bg-card"
+            >
+              Try again
+            </button>
+          </motion.div>
         )}
 
         <motion.div {...fade(0.3)} className="gift-art mt-6 sm:mt-8 w-screen sm:w-auto">

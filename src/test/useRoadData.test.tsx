@@ -175,4 +175,41 @@ describe('useRoadData', () => {
     expect(result.current.roads).toHaveLength(1);
     expect(result.current.roads[0]?.geometry[0][1]).toBeCloseTo(PORTO.lon, 6);
   });
+
+  it('retries the last city and clears the error once upstream recovers', async () => {
+    // A failed load is never cached, so the retry has to reach the network again rather than
+    // being answered by the in-module cache with the same failure.
+    let healthy = false;
+    const calls: number[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+        const body = JSON.parse(String((init?.body as string) ?? '{}')) as { bbox: number[] };
+        calls.push(body.bbox[1]);
+        if (!healthy) {
+          return new Response(JSON.stringify({ error: 'upstream_unavailable' }), { status: 503 });
+        }
+        return new Response(
+          JSON.stringify({ roads: roadsFor(7.77), bbox: [-0.05, 7.72, 0.05, 7.82], truncated: false }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }),
+    );
+
+    const { result } = renderHook(() => useRoadData());
+    await act(async () => {
+      await result.current.loadRoads(city('Retryville', 7.77));
+    });
+    expect(result.current.error).toMatch(/temporarily unavailable/);
+    expect(result.current.roads).toHaveLength(0);
+
+    healthy = true;
+    await act(async () => {
+      await result.current.retry();
+    });
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.roads).toHaveLength(1);
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+  });
 });

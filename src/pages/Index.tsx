@@ -35,10 +35,16 @@ const Index = () => {
 
   const [transparent, setTransparent] = useState(false);
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
-  const mainRef = useRef<HTMLDivElement>(null);
+  /**
+   * The artwork `<main>` lives in the workspace branch, which `AnimatePresence mode="wait"` does
+   * not mount until the landing animation has finished. Keying the pan/zoom effect off a callback
+   * ref means the listeners attach when the node actually appears, rather than on the state change
+   * that precedes it — previously the effect ran while the node was still absent and never again.
+   */
+  const [mainEl, setMainEl] = useState<HTMLElement | null>(null);
   const dragStartRef = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
   const [dragging, setDragging] = useState(false);
-  const { roads, bbox, isLoading, error, loadRoads } = useRoadData();
+  const { roads, bbox, isLoading, error, loadRoads, retry } = useRoadData();
   const svgRef = useRef<SVGSVGElement>(null);
 
   const handleTransparentChange = useCallback((value: boolean) => {
@@ -46,7 +52,7 @@ const Index = () => {
   }, []);
 
   useEffect(() => {
-    const el = mainRef.current;
+    const el = mainEl;
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -100,7 +106,7 @@ const Index = () => {
       window.removeEventListener('pointerup', endDrag);
       window.removeEventListener('pointercancel', endDrag);
     };
-  }, [selectedCity, dragging]);
+  }, [mainEl, dragging]);
 
   const handleCitySelect = (city: City) => {
     setSelectedCity(city);
@@ -208,7 +214,7 @@ const Index = () => {
 
               {/* Artwork area */}
               <main
-                ref={mainRef}
+                ref={setMainEl}
                 className="flex-1 relative overflow-hidden"
                 style={{
                   ...(transparent
@@ -249,8 +255,15 @@ const Index = () => {
                 </div>
 
                 {error && (
-                  <div className="px-6 pb-4 lg:hidden">
+                  <div className="px-6 pb-4 lg:hidden flex flex-col items-center gap-2">
                     <p className="text-sm text-muted-foreground text-center">{error}</p>
+                    <button
+                      type="button"
+                      onClick={() => void retry()}
+                      className="rounded-lg border border-border bg-card/80 px-4 py-1.5 text-xs text-foreground backdrop-blur transition-colors hover:bg-card"
+                    >
+                      Try again
+                    </button>
                   </div>
                 )}
 
@@ -279,8 +292,15 @@ const Index = () => {
               </div>
 
               {error && (
-                <div className="px-6 pt-6 hidden lg:block">
+                <div className="px-6 pt-6 hidden lg:flex lg:flex-col lg:items-start gap-3">
                   <p className="text-sm text-muted-foreground">{error}</p>
+                  <button
+                    type="button"
+                    onClick={() => void retry()}
+                    className="rounded-lg border border-border bg-card/80 px-4 py-1.5 text-xs text-foreground transition-colors hover:bg-card"
+                  >
+                    Try again
+                  </button>
                 </div>
               )}
               <ControlPanel

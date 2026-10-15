@@ -8,6 +8,7 @@ import geoHandler, {
   transformRoads,
   normaliseQuery,
   toCity,
+  resetOverpassState,
 } from '../../api/geo';
 import type { ApiRequest, ApiResponse } from '../../api/geo';
 
@@ -20,9 +21,11 @@ beforeEach(() => {
   process.env.GEOCONTACT = 'mailto:test@example.com';
   delete process.env.UPSTASH_REDIS_REST_URL;
   delete process.env.UPSTASH_REDIS_REST_TOKEN;
+  resetOverpassState();
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   for (const k of Object.keys(process.env)) delete process.env[k];
@@ -442,6 +445,80 @@ describe('geo endpoint', () => {
     const res = await call(geoHandler, { kind: 'roads', bbox: [45.2, 7.6, 45.25, 7.65] });
     expect(res.status).toBe(503);
     expect(res.body).toEqual({ error: 'upstream_unavailable' });
+  });
+
+  const oneWay = () =>
+    JSON.stringify({
+      elements: [
+        {
+          type: 'way',
+          id: 11,
+          tags: { highway: 'residential' },
+          geometry: [
+            { lat: 52.0, lon: 13.0 },
+            { lat: 52.01, lon: 13.01 },
+          ],
+        },
+      ],
+    });
+
+  it('serves the last cached map instead of failing once every mirror is down', async () => {
+    const bbox = [52.5, 13.3, 52.54, 13.34];
+    mockFetch(
+      () => new Response(oneWay(), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    const warm = await call(geoHandler, { kind: 'roads', bbox });
+    expect(warm.status).toBe(200);
+
+    // Age the entry past the 7-day fresh window but inside the 30-day stale window, then take
+    // every mirror offline. A returning visitor should still get their map.
+    vi.useFakeTimers();
+    vi.setSystemTime(Date.now() + 8 * 24 * 60 * 60 * 1000);
+    resetOverpassState();
+    mockFetch(() => new Response('all at capacity', { status: 503 }));
+
+    const res = await call(geoHandler, { kind: 'roads', bbox });
+    expect(res.status).toBe(200);
+    const body = res.body as { stale?: boolean; cached?: boolean; roads: unknown[] };
+    expect(body.stale).toBe(true);
+    expect(body.cached).toBe(true);
+    expect(body.roads).toHaveLength(1);
+  });
+
+  it('does not re-probe a mirror that just refused, once another one works', async () => {
+    const hosts: string[] = [];
+    mockFetch((url) => {
+      hosts.push(new URL(url).host);
+      if (hosts.length === 1) return new Response('busy', { status: 503 });
+      return new Response(oneWay(), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    });
+
+    const first = await call(geoHandler, { kind: 'roads', bbox: [52.6, 13.4, 52.64, 13.44] });
+    expect(first.status).toBe(200);
+    const failedHost = hosts[0];
+
+    hosts.length = 0;
+    const second = await call(geoHandler, { kind: 'roads', bbox: [52.7, 13.5, 52.74, 13.54] });
+    expect(second.status).toBe(200);
+    expect(hosts[0]).not.toBe(failedHost);
+  });
+
+  it('caps the fan-out once the time budget is spent', async () => {
+    vi.useFakeTimers();
+    let calls = 0;
+    mockFetch(() => {
+      calls++;
+      vi.setSystemTime(Date.now() + 6_000);
+      return new Response('down', { status: 503 });
+    });
+
+    const res = await call(geoHandler, { kind: 'roads', bbox: [48.8, 2.3, 48.84, 2.34] });
+    expect(res.status).toBe(503);
+    // Four windows times six mirrors would be 24 probes; the deadline must cut it short.
+    expect(calls).toBeLessThan(10);
   });
 
   it('makes a single upstream call for concurrent identical requests', async () => {

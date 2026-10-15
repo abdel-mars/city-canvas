@@ -15,6 +15,7 @@ export interface RoadResponse {
   bbox: BBox;
   /** The network hit our own way/point ceiling, so the map is a partial view of the window. */
   truncated: boolean;
+  stale?: boolean;
 }
 
 /**
@@ -54,5 +55,6 @@ export async function fetchRoads(bbox: BBox, signal?: AbortSignal): Promise<Road
     roads: data.roads ?? [],
     bbox: effective,
     truncated: data.truncated === true,
+    stale: data.stale === true,
   };
 }
