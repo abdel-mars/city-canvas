@@ -1,4 +1,5 @@
 import type { ArtworkSettings, City } from '@/types/artwork';
+import type { PosterShape } from '@/lib/posterShape';
 
 /**
  * Stable fingerprint of an artwork configuration.
@@ -16,14 +17,17 @@ import type { ArtworkSettings, City } from '@/types/artwork';
  *    request when Overpass cannot carry it, and two designs of "Tokyo" 6 km and 30 km across are
  *    different artwork under an identical name. It is also what makes a print survive a clamp or
  *    zoom change: the artwork a customer bought keeps resolving to the product that matches it.
+ *  - `shape`, because the frame is part of the product: the same window sold as a square or a
+ *    portrait is two different prints and must not share one listing.
  */
-export function designHash(cityName: string, settings: ArtworkSettings, city?: City): string {
+export function designHash(cityName: string, settings: ArtworkSettings, city?: City, shape?: PosterShape): string {
   const parts = [
     cityName.trim().toLowerCase(),
     // Fall back to empty rather than throwing: a caller that only has a name still gets a stable,
     // if coarser, key. The important fix is that callers holding a full City do pass it.
     (city?.displayName ?? '').trim().toLowerCase(),
     (city?.boundingBox ?? []).map((n) => n.toFixed(4)).join(','),
+    shape ?? '',
     settings.background,
     settings.road,
     settings.text,

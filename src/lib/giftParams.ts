@@ -1,4 +1,5 @@
 import { colorPresets } from '@/lib/presets';
+import { isPosterShape, shapeForBbox, type PosterShape } from '@/lib/posterShape';
 import type { ArtworkSettings, City, ColorPreset, FontFamily } from '@/types/artwork';
 
 /**
@@ -27,6 +28,11 @@ export type GiftDecodeError =
 export interface GiftDesign {
   city: City;
   settings: ArtworkSettings;
+  /**
+   * The frame the creator drew, carried explicitly so the gift page and the printed product agree
+   * even if the roads proxy later adjusts the window and would snap it to a different shape.
+   */
+  shape: PosterShape;
 }
 
 export interface GiftDecodeResult {
@@ -84,6 +90,10 @@ export function encodeGiftParams(city: City, settings: ArtworkSettings): URLSear
   params.set('show', settings.showCustomName ? '1' : '0');
   // Recorded so a Neon poster keeps its glow; harmless when the colours are custom.
   if (settings.preset?.name) params.set('preset', settings.preset.name);
+  // The shape the creator's canvas is using. `city.boundingBox` is already the drawn window (the
+  // creator replaces it with the roads extent before building the link), so deriving the shape from
+  // it here records exactly what the creator saw — and pins it against the gift page's re-fetch.
+  params.set('shape', shapeForBbox(city.boundingBox));
   return params;
 }
 
@@ -109,6 +119,11 @@ export function decodeGiftParams(input: URLSearchParams | string): GiftDecodeOut
   if (bbox.some((n) => !Number.isFinite(n))) return { ok: false, error: 'bounding-box' };
   const [south, west, north, east] = bbox as [number, number, number, number];
   if (south >= north || west >= east) return { ok: false, error: 'bounding-box' };
+
+  // An explicit shape wins (and is validated); an old link without one falls back to the window,
+  // which is what the shape used to be derived from at render time.
+  const rawShape = params.get('shape');
+  const shape: PosterShape = isPosterShape(rawShape) ? rawShape : shapeForBbox([south, west, north, east]);
 
   const background = params.get('bg') ?? '';
   const road = params.get('road') ?? '';
@@ -161,5 +176,5 @@ export function decodeGiftParams(input: URLSearchParams | string): GiftDecodeOut
     showCustomName,
   };
 
-  return { ok: true, design: { city, settings } };
+  return { ok: true, design: { city, settings, shape } };
 }

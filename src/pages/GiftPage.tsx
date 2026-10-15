@@ -7,7 +7,6 @@ import { ThemeToggle } from '@/components/ThemeToggle';
 import { decodeGiftParams } from '@/lib/giftParams';
 import { designHash } from '@/lib/designHash';
 import { formatPrice, type PosterVariant } from '@/lib/price';
-import { shapeForBbox } from '@/lib/posterShape';
 import { generatePrintArtworkBase64 } from '@/lib/download';
 import { useRoadData } from '@/hooks/useRoadData';
 import { useNoindex } from '@/hooks/useNoindex';
@@ -44,20 +43,16 @@ const GiftPage = () => {
   const isDark = theme === 'dark';
 
   const decoded = useMemo(() => decodeGiftParams(params), [params]);
-  const { city, settings } = decoded.ok ? decoded.design : { city: null, settings: null };
+  // The shape the poster is drawn at is also the shape sold. It's pinned by the link rather than
+  // re-derived from the window here, so the print can never disagree with what the creator saw even
+  // if the roads proxy adjusts the extent on the gift page's own fetch.
+  const { city, settings, shape } = decoded.ok ? decoded.design : { city: null, settings: null, shape: 'square' as const };
 
   // `error` is the geo failure; the local `error` below is for the purchase. Conflating them, or
   // forgetting to read this one, is how a gift link for an unrenderable area ends up as a blank
   // poster with no explanation.
   const { roads, bbox, isLoading, error: geoError, loadRoads } = useRoadData();
   const svgRef = useRef<SVGSVGElement>(null);
-
-  // The shape the poster is drawn at, which is also the shape sold. It follows the window the roads
-  // actually cover, so it must wait for bbox to arrive rather than keying off the city alone.
-  const shape = useMemo(
-    () => shapeForBbox(bbox ?? city?.boundingBox ?? [0, 0, 0, 0]),
-    [bbox, city],
-  );
 
   const [variants, setVariants] = useState<PosterVariant[] | null>(null);
   const [currency, setCurrency] = useState('USD');
@@ -124,7 +119,7 @@ const GiftPage = () => {
         image_base64: await generatePrintArtworkBase64(svgRef.current, 5),
         city_name: city.name,
         city_country: city.country ?? '',
-        design_hash: designHash(city.name, settings, city),
+        design_hash: designHash(city.name, settings, city, shape),
         shape,
       };
 
@@ -255,6 +250,7 @@ const GiftPage = () => {
             city={city}
             roads={roads}
             bbox={bbox ?? undefined}
+            shape={shape}
             settings={settings}
             isLoading={isLoading}
             label={posterLabel}

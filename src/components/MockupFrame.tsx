@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { Road, ArtworkSettings, City } from '@/types/artwork';
 import { createProjection, getStrokeWidth } from '@/lib/projection';
 import { fontMap } from '@/lib/presets';
-import { shapeForBbox, shapeGeometry } from '@/lib/posterShape';
+import { shapeForBbox, shapeGeometry, type PosterShape } from '@/lib/posterShape';
 import type { BBox } from '@/lib/overpass';
 
 const FRAMED_SHADOW = '0px 8px 30px rgba(0, 0, 0, 0.15)';
@@ -16,18 +16,20 @@ interface MockupFrameProps {
   settings: ArtworkSettings;
   isLoading: boolean;
   bbox?: BBox;
+  /** The frame the link pinned. When absent, derived from the window (creator's own preview). */
+  shape?: PosterShape;
   transparent?: boolean;
   label?: string;
   className?: string;
 }
 
 export const MockupFrame = forwardRef<SVGSVGElement, MockupFrameProps>(
-  ({ city, roads, settings, isLoading, bbox, transparent = false, label, className = '' }, ref) => {
+  ({ city, roads, settings, isLoading, bbox, shape, transparent = false, label, className = '' }, ref) => {
     const { preset, background, road, text, font, textPositionY, textSize, customName, showCustomName } = settings;
     const name = showCustomName && customName ? customName : city.name;
     const [hovered, setHovered] = useState(false);
 
-    const { width: canvasW, height: canvasH } = shapeGeometry(shapeForBbox(bbox ?? city.boundingBox));
+    const { width: canvasW, height: canvasH } = shapeGeometry(shape ?? shapeForBbox(bbox ?? city.boundingBox));
 
     const projection = useMemo(
       () =>

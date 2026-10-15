@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { decodeGiftParams, encodeGiftParams, giftUrl } from '@/lib/giftParams';
 import { designHash } from '@/lib/designHash';
+import { shapeForBbox } from '@/lib/posterShape';
 import { formatPrice } from '@/lib/price';
 import { colorPresets } from '@/lib/presets';
 import type { ArtworkSettings, City } from '@/types/artwork';
@@ -73,6 +74,40 @@ describe('giftParams round-trip', () => {
 
   it('builds a /gift URL', () => {
     expect(giftUrl(lisbon, settings())).toMatch(/^\/gift\?city=Lisbon/);
+  });
+});
+
+describe('giftParams shape', () => {
+  it('pins the shape derived from the drawn window', () => {
+    const decoded = decodeGiftParams(encodeGiftParams(lisbon, settings()));
+    if (!decoded.ok) throw new Error('expected a valid design');
+    expect(decoded.design.shape).toBe(shapeForBbox(lisbon.boundingBox));
+  });
+
+  it('honours an explicit, valid shape', () => {
+    const params = encodeGiftParams(lisbon, settings());
+    params.set('shape', 'vertical');
+    const decoded = decodeGiftParams(params);
+    if (!decoded.ok) throw new Error('expected a valid design');
+    expect(decoded.design.shape).toBe('vertical');
+  });
+
+  it('falls back to the window when the shape is missing or bogus', () => {
+    const expected = shapeForBbox(lisbon.boundingBox);
+    for (const value of ['', 'wide', 'SQUARE', 'null']) {
+      const params = encodeGiftParams(lisbon, settings());
+      params.set('shape', value);
+      const decoded = decodeGiftParams(params);
+      if (!decoded.ok) throw new Error('expected a valid design');
+      expect(decoded.design.shape).toBe(expected);
+    }
+  });
+
+  it('treats different shapes as different products (they must not share a listing)', () => {
+    const s = settings();
+    expect(designHash(lisbon.name, s, lisbon, 'square')).not.toBe(
+      designHash(lisbon.name, s, lisbon, 'vertical'),
+    );
   });
 });
 
