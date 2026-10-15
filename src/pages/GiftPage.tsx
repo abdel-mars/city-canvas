@@ -123,6 +123,7 @@ const GiftPage = () => {
       const payload = {
         image_base64: await generatePrintArtworkBase64(svgRef.current, 5),
         city_name: city.name,
+        city_country: city.country ?? '',
         design_hash: designHash(city.name, settings, city),
         shape,
       };

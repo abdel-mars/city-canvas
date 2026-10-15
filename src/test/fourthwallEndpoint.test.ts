@@ -46,4 +46,15 @@ describe('endpoint: config', () => {
     await handler(req, res);
     expect(rec.status).toBe(405);
   });
+  it('answers the background trigger only when the secret matches', async () => {
+    Object.assign(process.env, { FOURTHWALL_API_USERNAME: 'u', FOURTHWALL_API_PASSWORD: 'p', FOURTHWALL_SHOP_DOMAIN: 'shop.fourthwall.com', APP_ORIGIN: 'http://localhost:8080' });
+
+    const { res: pub, rec: pubRec } = makeRes();
+    await handler({ method: 'GET', headers: {} }, pub);
+    expect(pubRec.status).toBe(405);
+
+    const { res: bg, rec: bgRec } = makeRes();
+    await handler({ method: 'GET', headers: { 'x-fw-bg': 'p' }, url: '/api/create-fourthwall?hash=deadbeef' }, bg);
+    expect(bgRec.status).toBe(202);
+  });
 });

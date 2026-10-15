@@ -1,3 +1,5 @@
+import { waitUntil } from '@vercel/functions';
+
 const FW_BASE = 'https://api.fourthwall.com';
 
 const MAX_BODY_BYTES = 4_000_000;
@@ -20,12 +22,36 @@ const HASH_RE = /^[a-f0-9]{8,16}$/;
 const POSTER_TEMPLATE_ID = (process.env.FOURTHWALL_TEMPLATE_ID ?? 'pro_kRSsoYjwSoyyTEmWko5o0A').trim();
 const STICKER_TEMPLATE_ID = (process.env.FOURTHWALL_STICKER_TEMPLATE_ID ?? 'pro_358').trim();
 const STICKER_SHEET_TEMPLATE_ID = (process.env.FOURTHWALL_STICKER_SHEET_TEMPLATE_ID ?? 'pro_6a8bdd4fd14d4cf687').trim();
+const MUG_TEMPLATE_ID = (process.env.FOURTHWALL_MUG_TEMPLATE_ID ?? 'pro_4v5OfYhyRx62KW5b7Oj6Uw').trim();
 const POSTER_MARGIN_USD = 12;
 const STICKER_MARGIN_USD = 6;
 const STICKER_SHEET_MARGIN_USD = 6;
+const MUG_MARGIN_USD = 8;
 const POSTER_COLORS = ['Black', 'Red Oak'];
 const STICKER_COLORS = ['White'];
 const STICKER_SHEET_COLORS = ['White'];
+const MUG_COLORS = ['White'];
+const MUG_SIZES = ['11oz', '15oz', '20 oz'];
+
+/**
+ * Every product that ships for a design. The poster is made in the request that returns the
+ * checkout URL; the rest are made afterwards, in the background, so the visitor never waits.
+ */
+type ProductKind = 'poster' | 'sticker' | 'sticker-sheet' | 'mug';
+const EXTRA_KINDS: ProductKind[] = ['sticker', 'sticker-sheet', 'mug'];
+
+/** Fourthwall allows 5 product creates a minute per shop, so space them a dozen seconds apart. */
+const DEFAULT_CREATE_GAP_MS = 12_000;
+/** Overridable for tests (set to 0 to exercise the loop without real delays). */
+function createGapMs(): number {
+  const n = Number(process.env.FOURTHWALL_BG_GAP_MS);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_CREATE_GAP_MS;
+}
+const LAST_CREATE_KEY = 'fw:shop:last-create';
+/** How long a background invocation works before handing the rest to a fresh one. */
+const BG_BUDGET_MS = 40_000;
+const JOB_TTL_SECONDS = 7200;
+const MAX_BG_PASSES = 15;
 
 /** Poster shapes are a pure function of the city's window, so the client tells us which one it drew. */
 type PosterShape = 'square' | 'horizontal' | 'vertical';
@@ -45,6 +71,8 @@ const STICKER_SIZES = ['3" x 3"', '4" x 4"', '5.5" x 5.5"'];
 export interface ApiRequest {
   method?: string;
   headers: Record<string, string | string[] | undefined>;
+  query?: Record<string, string | string[] | undefined>;
+  url?: string;
   body?: unknown;
 }
 export interface ApiResponse {
@@ -58,6 +86,7 @@ export interface Env {
   FOURTHWALL_API_PASSWORD: string;
   FOURTHWALL_SHOP_DOMAIN: string;
   APP_ORIGIN: string;
+  FOURTHWALL_BG_SECRET?: string;
   UPSTASH_REDIS_REST_URL?: string;
   UPSTASH_REDIS_REST_TOKEN?: string;
 }
@@ -68,9 +97,18 @@ function readEnv(): Env {
     FOURTHWALL_API_PASSWORD: process.env.FOURTHWALL_API_PASSWORD ?? '',
     FOURTHWALL_SHOP_DOMAIN: process.env.FOURTHWALL_SHOP_DOMAIN ?? '',
     APP_ORIGIN: process.env.APP_ORIGIN ?? '',
+    FOURTHWALL_BG_SECRET: process.env.FOURTHWALL_BG_SECRET,
     UPSTASH_REDIS_REST_URL: process.env.UPSTASH_REDIS_REST_URL,
     UPSTASH_REDIS_REST_TOKEN: process.env.UPSTASH_REDIS_REST_TOKEN,
   };
+}
+
+/**
+ * Secret guarding the internal background trigger. Falls back to the API password, which is
+ * already server-side only, so the feature needs no extra configuration to work.
+ */
+function backgroundSecret(env: Env): string {
+  return (env.FOURTHWALL_BG_SECRET || env.FOURTHWALL_API_PASSWORD || '').trim();
 }
 
 function credentials(env: Env): string {
@@ -90,7 +128,8 @@ async function fwFetch<T>(env: Env, path: string, init?: RequestInit): Promise<T
     const body = await res.text();
     throw new Error(`Fourthwall ${path} -> [${res.status}]: ${body.slice(0, 400)}`);
   }
-  return (await res.json()) as T;
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 function header(headers: ApiRequest['headers'], name: string): string | null {
@@ -263,18 +302,31 @@ interface ProductSpec {
   colors: string[];
   sizes?: string[];
   profitMargin: number;
-  kind: 'poster' | 'sticker' | 'sticker-sheet';
+  kind: ProductKind;
   city: string;
   country: string;
   designHash: string;
 }
 
+const KIND_LABEL: Record<ProductKind, string> = {
+  poster: 'City Lines Art Framed Poster',
+  sticker: 'City Lines Art Sticker',
+  'sticker-sheet': 'City Lines Art Sticker Sheet',
+  mug: 'City Lines Art Mug',
+};
+
+/** A product's title is also its dedupe marker, so it carries the kind label verbatim. */
+const KIND_MARKER: Record<ProductKind, string> = {
+  poster: 'Framed Poster',
+  sticker: 'Stickers',
+  'sticker-sheet': 'Sticker Sheet',
+  mug: 'Mug',
+};
+
 function productTitle(spec: ProductSpec): string {
   const city = esc(spec.city);
   const country = esc(spec.country);
-  let kind = 'City Lines Art Sticker';
-  if (spec.kind === 'poster') kind = 'City Lines Art Framed Poster';
-  else if (spec.kind === 'sticker-sheet') kind = 'City Lines Art Sticker Sheet';
+  const kind = KIND_LABEL[spec.kind];
   if (country) return `${city} | ${country} | ${kind}`;
   return `${city} | ${kind}`;
 }
@@ -295,6 +347,15 @@ function productDescription(spec: ProductSpec): string {
   const stickerIntro = spec.kind === 'sticker-sheet'
     ? 'presented as a sheet of kiss-cut stickers of varying sizes.'
     : 'designed for stickers.';
+  if (spec.kind === 'mug') {
+    return [
+      `<p><strong>${city}</strong>, drawn through its streets.</p>`,
+      `<p>A study of the city's urban rhythm, translated onto a ceramic mug. Intersecting roads, geometric patterns, and the movement of everyday life become a minimalist line-art map of modern ${country}.</p>`,
+      `<p>Part of <em>City Lines</em>, a visual collection exploring the identity of cities around the world through minimalist line art.</p>`,
+      `<p>One city. Countless lines. Carry it with you.</p>`,
+      token,
+    ].join('\n');
+  }
   return [
     `<p><strong>${city}</strong>, drawn through its streets.</p>`,
     `<p>A study of the city's urban rhythm, transformed into minimalist line art ${stickerIntro} Intersecting roads, geometric patterns, and the movement of everyday life become a unique visual representation of ${city}, ready to accompany you wherever you go.</p>`,
@@ -344,7 +405,7 @@ function productUrl(env: Env, slug: string) {
 const memo = new Map<string, { at: number; value: { productId: string; slug: string } }>();
 const MEMO_TTL_MS = 30_000;
 
-async function resolveExisting(env: Env, hash: string, type: 'poster' | 'sticker' | 'sticker-sheet'): Promise<{ productId: string; slug: string } | null> {
+async function resolveExisting(env: Env, hash: string, type: ProductKind): Promise<{ productId: string; slug: string } | null> {
   const cached = memo.get(`${type}:${hash}`);
   if (cached && Date.now() - cached.at < MEMO_TTL_MS) return cached.value;
 
@@ -363,7 +424,7 @@ async function resolveExisting(env: Env, hash: string, type: 'poster' | 'sticker
     } catch { /* fall through */ }
   }
 
-  const marker = type === 'poster' ? 'Framed Poster' : type === 'sticker' ? 'Stickers' : 'Sticker Sheet';
+  const marker = KIND_MARKER[type];
   for (let page = 0; page < 5; page++) {
     try {
       const body = await fwFetch<{ results?: { id: string; name?: string; slug?: string }[] }>(
@@ -386,13 +447,299 @@ async function resolveExisting(env: Env, hash: string, type: 'poster' | 'sticker
   return null;
 }
 
-async function persistDesign(env: Env, hash: string, type: 'poster' | 'sticker' | 'sticker-sheet', value: { productId: string; slug: string }) {
+async function persistDesign(env: Env, hash: string, type: ProductKind, value: { productId: string; slug: string }) {
   const url = env.UPSTASH_REDIS_REST_URL!;
   const token = env.UPSTASH_REDIS_REST_TOKEN!;
   const key = `fw:design:${type}:${hash}`;
   try { await redisPipeline(url, token, [['SET', key, JSON.stringify(value), 'EX', DAY * 90]]); } catch { /* non-fatal */ }
   memo.set(`${type}:${hash}`, { at: Date.now(), value });
 }
+
+const designKey = (kind: ProductKind, hash: string) => `fw:design:${kind}:${hash}`;
+const imageKey = (hash: string) => `fw:design:image:${hash}`;
+const jobKey = (hash: string) => `fw:job:${hash}`;
+const collectionKey = (country: string) => `fw:collection:${country.toLowerCase()}`;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Runs work after the response has been sent, or (outside Vercel) lets it settle on its own. */
+function schedule(promise: Promise<unknown>): void {
+  const settled = promise.catch((err) => console.error('background task failed:', err));
+  try {
+    waitUntil(settled);
+  } catch {
+    void settled;
+  }
+}
+
+function queryParam(req: ApiRequest, name: string): string | null {
+  const fromQuery = req.query?.[name];
+  if (fromQuery) return Array.isArray(fromQuery) ? fromQuery[0] ?? null : fromQuery;
+  if (!req.url) return null;
+  try {
+    return new URL(req.url, 'http://localhost').searchParams.get(name);
+  } catch {
+    return null;
+  }
+}
+
+function selfOrigin(env: Env, req: ApiRequest): string {
+  const host = header(req.headers, 'x-forwarded-host') ?? header(req.headers, 'host');
+  if (host) {
+    const local = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(host);
+    const proto = header(req.headers, 'x-forwarded-proto') ?? (local ? 'http' : 'https');
+    return `${proto}://${host}`;
+  }
+  if (env.APP_ORIGIN) return env.APP_ORIGIN.replace(/\/+$/, '');
+  if (process.env.VERCEL_URL) return `https://${process.env.VERCEL_URL}`;
+  return '';
+}
+
+/** Records that a product was just created, so the next one waits out the shop's rate window. */
+async function markCreate(env: Env): Promise<void> {
+  const url = env.UPSTASH_REDIS_REST_URL!;
+  const token = env.UPSTASH_REDIS_REST_TOKEN!;
+  try { await redisPipeline(url, token, [['SET', LAST_CREATE_KEY, String(Date.now()), 'EX', 120]]); } catch { /* non-fatal */ }
+}
+
+/** Waits out the gap since the last create; false if that wait would blow the pass's budget. */
+async function waitForCreateSlot(env: Env, budgetMs: number): Promise<boolean> {
+  const url = env.UPSTASH_REDIS_REST_URL!;
+  const token = env.UPSTASH_REDIS_REST_TOKEN!;
+  let last = 0;
+  try {
+    const r = await redisPipeline(url, token, [['GET', LAST_CREATE_KEY]]);
+    last = Number(r[0]) || 0;
+  } catch { /* treat as no recent create */ }
+  const wait = Math.max(0, createGapMs() - (Date.now() - last));
+  if (wait > budgetMs) return false;
+  if (wait > 0) await sleep(wait);
+  return true;
+}
+
+async function saveImageId(env: Env, hash: string, imageId: string): Promise<void> {
+  const url = env.UPSTASH_REDIS_REST_URL!;
+  const token = env.UPSTASH_REDIS_REST_TOKEN!;
+  try { await redisPipeline(url, token, [['SET', imageKey(hash), imageId, 'EX', DAY * 90]]); } catch { /* non-fatal */ }
+}
+
+async function loadImageId(env: Env, hash: string): Promise<string | null> {
+  const url = env.UPSTASH_REDIS_REST_URL!;
+  const token = env.UPSTASH_REDIS_REST_TOKEN!;
+  try {
+    const r = await redisPipeline(url, token, [['GET', imageKey(hash)]]);
+    return typeof r[0] === 'string' && r[0] ? r[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+interface Job {
+  hash: string;
+  city: string;
+  country: string;
+  imageId: string;
+  posterId: string;
+  createdAt: number;
+}
+
+async function saveJob(env: Env, job: Job): Promise<void> {
+  const url = env.UPSTASH_REDIS_REST_URL!;
+  const token = env.UPSTASH_REDIS_REST_TOKEN!;
+  await redisPipeline(url, token, [['SET', jobKey(job.hash), JSON.stringify(job), 'EX', JOB_TTL_SECONDS]]);
+}
+
+async function loadJob(env: Env, hash: string): Promise<Job | null> {
+  const url = env.UPSTASH_REDIS_REST_URL!;
+  const token = env.UPSTASH_REDIS_REST_TOKEN!;
+  try {
+    const r = await redisPipeline(url, token, [['GET', jobKey(hash)]]);
+    if (typeof r[0] === 'string') return JSON.parse(r[0]) as Job;
+  } catch { /* ignore */ }
+  return null;
+}
+
+async function deleteJob(env: Env, hash: string): Promise<void> {
+  const url = env.UPSTASH_REDIS_REST_URL!;
+  const token = env.UPSTASH_REDIS_REST_TOKEN!;
+  try { await redisPipeline(url, token, [['DEL', jobKey(hash)]]); } catch { /* non-fatal */ }
+}
+
+/** Reads every design record for a hash in one round trip. */
+async function loadDesigns(env: Env, hash: string, kinds: ProductKind[]): Promise<Map<ProductKind, { productId: string; slug: string }>> {
+  const url = env.UPSTASH_REDIS_REST_URL!;
+  const token = env.UPSTASH_REDIS_REST_TOKEN!;
+  const out = new Map<ProductKind, { productId: string; slug: string }>();
+  try {
+    const r = await redisPipeline(url, token, kinds.map((kind) => ['GET', designKey(kind, hash)]));
+    kinds.forEach((kind, i) => {
+      const raw = r[i];
+      if (typeof raw !== 'string') return;
+      try {
+        const parsed = JSON.parse(raw) as { productId?: string; slug?: string };
+        if (parsed.productId && parsed.slug) out.set(kind, { productId: parsed.productId, slug: parsed.slug });
+      } catch { /* ignore */ }
+    });
+  } catch { /* ignore */ }
+  return out;
+}
+
+function specFor(kind: ProductKind, job: Pick<Job, 'city' | 'country' | 'hash'>): ProductSpec {
+  const base = { city: job.city, country: job.country, designHash: job.hash };
+  switch (kind) {
+    case 'sticker':
+      return { ...base, templateId: STICKER_TEMPLATE_ID, colors: STICKER_COLORS, sizes: STICKER_SIZES, profitMargin: STICKER_MARGIN_USD, kind };
+    case 'sticker-sheet':
+      return { ...base, templateId: STICKER_SHEET_TEMPLATE_ID, colors: STICKER_SHEET_COLORS, profitMargin: STICKER_SHEET_MARGIN_USD, kind };
+    case 'mug':
+      return { ...base, templateId: MUG_TEMPLATE_ID, colors: MUG_COLORS, sizes: MUG_SIZES, profitMargin: MUG_MARGIN_USD, kind };
+    default:
+      throw new Error(`no spec for kind ${kind}`);
+  }
+}
+
+interface CollectionSummary { id: string; name: string }
+const collectionMemo = new Map<string, string>();
+
+async function listCollections(env: Env): Promise<CollectionSummary[]> {
+  const out: CollectionSummary[] = [];
+  for (let page = 0; page < 10; page++) {
+    const body = await fwFetch<{ results?: CollectionSummary[] }>(env, `/open-api/v1.0/collections?page=${page}&size=100`);
+    const results = body.results ?? [];
+    out.push(...results);
+    if (results.length < 100) break;
+  }
+  return out;
+}
+
+/** Finds (or creates) the country's collection and folds this city's products into it. */
+async function ensureCollection(env: Env, country: string, offerIds: string[]): Promise<void> {
+  const name = country.trim();
+  const unique = Array.from(new Set(offerIds.filter(Boolean)));
+  if (!name || unique.length === 0) return;
+  const memoKey = name.toLowerCase();
+  const url = env.UPSTASH_REDIS_REST_URL!;
+  const token = env.UPSTASH_REDIS_REST_TOKEN!;
+
+  let id: string | null = collectionMemo.get(memoKey) ?? null;
+  if (!id) {
+    try {
+      const r = await redisPipeline(url, token, [['GET', collectionKey(name)]]);
+      if (typeof r[0] === 'string' && r[0]) id = r[0];
+    } catch { /* ignore */ }
+  }
+  if (!id) {
+    try {
+      const found = (await listCollections(env)).find((c) => c.name.toLowerCase() === memoKey);
+      if (found) id = found.id;
+    } catch { /* ignore */ }
+  }
+
+  if (!id) {
+    let created: { id?: string } | null = null;
+    try {
+      created = await fwFetch<{ id?: string }>(env, '/open-api/v1.0/collections', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, description: `City Lines Art prints, stickers and gifts from ${name}.`, offerIds: unique }),
+      });
+    } catch (err) {
+      // A slug clash means a collection already owns the slug; adopt it rather than fail.
+      console.error(`collection create failed for ${name}:`, err);
+    }
+    if (created?.id) {
+      id = created.id;
+    } else {
+      const found = (await listCollections(env)).find((c) => c.name.toLowerCase() === memoKey);
+      id = found?.id ?? null;
+    }
+  } else {
+    const detail = await fwFetch<{ offerIds?: string[] }>(env, `/open-api/v1.0/collections/${id}`);
+    const merged = Array.from(new Set([...(detail.offerIds ?? []), ...unique]));
+    await fwFetch<unknown>(env, `/open-api/v1.0/collections/${id}/products`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ offerIds: merged }),
+    });
+  }
+
+  if (!id) return;
+  collectionMemo.set(memoKey, id);
+  try { await redisPipeline(url, token, [['SET', collectionKey(name), id, 'EX', DAY * 30]]); } catch { /* non-fatal */ }
+}
+
+async function reconcileCollection(env: Env, job: Job): Promise<void> {
+  if (!job.country) return;
+  const designs = await loadDesigns(env, job.hash, EXTRA_KINDS);
+  const ids = [job.posterId, ...EXTRA_KINDS.map((kind) => designs.get(kind)?.productId ?? '')].filter(Boolean);
+  await ensureCollection(env, job.country, ids);
+}
+
+async function triggerBackground(env: Env, origin: string, hash: string): Promise<void> {
+  const secret = backgroundSecret(env);
+  if (!secret || !origin) return;
+  const url = `${origin}/api/create-fourthwall?hash=${encodeURIComponent(hash)}`;
+  try {
+    await fetch(url, { headers: { 'x-fw-bg': secret } });
+  } catch (err) {
+    console.error('background trigger failed:', err);
+  }
+}
+
+/**
+ * Makes the cross-sell products a poster's design does not have yet, then files them under the
+ * city's country. Works a bounded slice at a time and hands the rest to a fresh invocation, so it
+ * never runs past the function's own time limit.
+ */
+async function runBackground(env: Env, hash: string, origin: string): Promise<void> {
+  const url = env.UPSTASH_REDIS_REST_URL!;
+  const token = env.UPSTASH_REDIS_REST_TOKEN!;
+  const job = await loadJob(env, hash);
+  if (!job) return;
+
+  const triesKey = `${jobKey(hash)}:tries`;
+  let tries = 0;
+  try {
+    const r = await redisPipeline(url, token, [['INCR', triesKey], ['EXPIRE', triesKey, JOB_TTL_SECONDS]]);
+    tries = Number(r[0]);
+  } catch { /* ignore */ }
+  if (tries > MAX_BG_PASSES) { await deleteJob(env, hash); return; }
+
+  const designs = await loadDesigns(env, hash, EXTRA_KINDS);
+  if (EXTRA_KINDS.every((kind) => designs.has(kind))) {
+    await reconcileCollection(env, job);
+    await deleteJob(env, hash);
+    return;
+  }
+
+  const deadline = Date.now() + BG_BUDGET_MS;
+  for (const kind of EXTRA_KINDS) {
+    if (designs.has(kind)) continue;
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    if (!(await waitForCreateSlot(env, remaining))) break;
+    try {
+      const created = await createDesignProduct(env, job.imageId, specFor(kind, job));
+      await persistDesign(env, hash, kind, { productId: created.productId, slug: created.slug });
+      await markCreate(env);
+    } catch (err) {
+      // A 429 just means the shop's minute window is full — leave it queued for the next pass.
+      if (!String(err).includes('429')) console.error(`background ${kind} failed:`, err);
+      break;
+    }
+  }
+
+  const after = await loadDesigns(env, hash, EXTRA_KINDS);
+  if (EXTRA_KINDS.every((kind) => after.has(kind))) {
+    await reconcileCollection(env, job);
+    await deleteJob(env, hash);
+    return;
+  }
+  await triggerBackground(env, origin, hash);
+}
+
 
 export default async function handler(req: ApiRequest, res: ApiResponse): Promise<void> {
   const env = readEnv();
@@ -404,6 +751,20 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   void req;
     for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
     res.status(204).end();
+    return;
+  }
+  if (req.method === 'GET') {
+    const secret = backgroundSecret(env);
+    const provided = header(req.headers, 'x-fw-bg');
+    if (secret && provided && provided === secret) {
+      const hash = queryParam(req, 'hash');
+      send(env, req, res, { ok: true }, 202);
+      if (hash && HASH_RE.test(hash) && storeConfigured(env)) {
+        schedule(runBackground(env, hash, selfOrigin(env, req)));
+      }
+      return;
+    }
+    send(env, req, res, { error: 'method_not_allowed' }, 405, { Allow: 'POST, OPTIONS' });
     return;
   }
   if (req.method !== 'POST') {
@@ -472,15 +833,11 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   // which is what every pre-existing design was.
   const posterSizes = POSTER_SIZES_BY_SHAPE[isPosterShape(body.shape) ? body.shape : 'square'];
   const existingPoster = await resolveExisting(env, hash, 'poster');
-  let poster: { productId: string; slug: string };
-  let needUpload = !existingPoster;
-  const existingSticker = await resolveExisting(env, hash, 'sticker');
-  const existingStickerSheet = await resolveExisting(env, hash, 'sticker-sheet');
+  // The cross-sell products missing for this design decide what the background job has to make.
+  const existingExtras = await loadDesigns(env, hash, EXTRA_KINDS);
+  const missingExtras = EXTRA_KINDS.filter((kind) => !existingExtras.has(kind));
 
-  if (!existingPoster || !existingSticker || !existingStickerSheet) needUpload = true;
-
-  let imageId: string | null = null;
-  if (needUpload) {
+  if (!existingPoster) {
     try {
       const rl = await limitCreations(env, ip);
       if (rl.limited) return tooMany(env, req, res, rl.retryAfter);
@@ -494,12 +851,17 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
   try {
     const size = Buffer.from(body.image_base64, 'base64').byteLength;
     const dims = jpegDimensions(Buffer.from(body.image_base64, 'base64')) ?? { width: 800, height: 800 };
+    let imageId = await loadImageId(env, hash);
 
-    let posterVariants: CreatedProduct['variants'] | undefined = existingPoster ? undefined : undefined;
+    let poster: { productId: string; slug: string };
+    let posterVariants: CreatedProduct['variants'] | undefined;
     if (existingPoster) {
       poster = existingPoster;
     } else {
-      if (imageId === null) imageId = await uploadImage(env, body.image_base64, size, dims);
+      if (!imageId) {
+        imageId = await uploadImage(env, body.image_base64, size, dims);
+        await saveImageId(env, hash, imageId);
+      }
       const created = await createDesignProduct(env, imageId, {
         templateId: POSTER_TEMPLATE_ID,
         colors: POSTER_COLORS,
@@ -511,55 +873,30 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
         designHash: hash,
       });
       await persistDesign(env, hash, 'poster', { productId: created.productId, slug: created.slug });
+      await markCreate(env);
       poster = { productId: created.productId, slug: created.slug };
       posterVariants = created.variants;
     }
 
-    // Always ensure the sticker product exists so it shows up in the shop catalog.
-    const needStickerUpload = !existingSticker;
-    if (needStickerUpload && imageId === null) imageId = await uploadImage(env, body.image_base64, size, dims);
-    if (!existingSticker) {
+    // The poster is what the visitor is waiting on; the rest of the catalog is made afterwards.
+    // The job is enqueued before we respond so that, the moment the response is sent, the only
+    // thing left to do is schedule the first background pass — nothing can drop it in between.
+    let queued = false;
+    if (missingExtras.length > 0) {
+      // Everything past the response is best-effort: a failure here must not undo a good poster.
       try {
-        if (imageId === null) imageId = await uploadImage(env, body.image_base64, size, dims);
-        const createdSticker = await createDesignProduct(env, imageId!, {
-          templateId: STICKER_TEMPLATE_ID,
-          colors: STICKER_COLORS,
-          sizes: STICKER_SIZES,
-          profitMargin: STICKER_MARGIN_USD,
-          kind: 'sticker',
-          city,
-          country,
-          designHash: hash,
-        });
-        await persistDesign(env, hash, 'sticker', { productId: createdSticker.productId, slug: createdSticker.slug });
+        let bgImage = imageId;
+        if (!bgImage) {
+          bgImage = await uploadImage(env, body.image_base64, size, dims);
+          await saveImageId(env, hash, bgImage);
+        }
+        await saveJob(env, { hash, city, country, imageId: bgImage, posterId: poster.productId, createdAt: Date.now() });
+        queued = true;
       } catch (err) {
-        console.error('create-fourthwall sticker failed (poster still created):', err);
+        console.error('background enqueue failed (poster still returned):', err);
       }
     }
 
-    // Sticker sheet (multiple stickers, varying sizes) — auto-create so the
-    // same artwork surfaces in the shop catalog as a sticker sheet.
-    const needSheetUpload = !existingStickerSheet;
-    if (needSheetUpload && imageId === null) imageId = await uploadImage(env, body.image_base64, size, dims);
-    if (!existingStickerSheet) {
-      try {
-        if (imageId === null) imageId = await uploadImage(env, body.image_base64, size, dims);
-        const createdSheet = await createDesignProduct(env, imageId!, {
-          templateId: STICKER_SHEET_TEMPLATE_ID,
-          colors: STICKER_SHEET_COLORS,
-          profitMargin: STICKER_SHEET_MARGIN_USD,
-          kind: 'sticker-sheet',
-          city,
-          country,
-          designHash: hash,
-        });
-        await persistDesign(env, hash, 'sticker-sheet', { productId: createdSheet.productId, slug: createdSheet.slug });
-      } catch (err) {
-        console.error('create-fourthwall sticker sheet failed (poster still created):', err);
-      }
-    }
-
-    // Only return poster variants when freshly created.
     send(env, req, res, {
       product_url: productUrl(env, poster.slug),
       product_id: poster.productId,
@@ -567,6 +904,8 @@ export default async function handler(req: ApiRequest, res: ApiResponse): Promis
       reused: Boolean(existingPoster),
       variants: posterVariants,
     }, 200);
+
+    if (queued) schedule(runBackground(env, hash, selfOrigin(env, req)));
   } catch (err) {
     console.error('create-fourthwall failed:', err);
     send(env, req, res, { error: 'Could not prepare your print. Please try again.' }, 500);
