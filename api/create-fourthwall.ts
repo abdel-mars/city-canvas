@@ -614,19 +614,19 @@ async function listCollections(env: Env): Promise<CollectionSummary[]> {
   return out;
 }
 
-/** Finds (or creates) the country's collection and folds this city's products into it. */
-async function ensureCollection(env: Env, country: string, offerIds: string[]): Promise<void> {
-  const name = country.trim();
+/** Finds (or creates) a collection by name and folds these offers into it (idempotent union). */
+async function ensureCollection(env: Env, name: string, description: string, offerIds: string[]): Promise<void> {
+  const trimmed = name.trim();
   const unique = Array.from(new Set(offerIds.filter(Boolean)));
-  if (!name || unique.length === 0) return;
-  const memoKey = name.toLowerCase();
+  if (!trimmed || unique.length === 0) return;
+  const memoKey = trimmed.toLowerCase();
   const url = env.UPSTASH_REDIS_REST_URL!;
   const token = env.UPSTASH_REDIS_REST_TOKEN!;
 
   let id: string | null = collectionMemo.get(memoKey) ?? null;
   if (!id) {
     try {
-      const r = await redisPipeline(url, token, [['GET', collectionKey(name)]]);
+      const r = await redisPipeline(url, token, [['GET', collectionKey(trimmed)]]);
       if (typeof r[0] === 'string' && r[0]) id = r[0];
     } catch { /* ignore */ }
   }
@@ -643,11 +643,11 @@ async function ensureCollection(env: Env, country: string, offerIds: string[]): 
       created = await fwFetch<{ id?: string }>(env, '/open-api/v1.0/collections', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, description: `City Lines Art prints, stickers and gifts from ${name}.`, offerIds: unique }),
+        body: JSON.stringify({ name: trimmed, description, offerIds: unique }),
       });
     } catch (err) {
       // A slug clash means a collection already owns the slug; adopt it rather than fail.
-      console.error(`collection create failed for ${name}:`, err);
+      console.error(`collection create failed for ${trimmed}:`, err);
     }
     if (created?.id) {
       id = created.id;
@@ -667,14 +667,39 @@ async function ensureCollection(env: Env, country: string, offerIds: string[]): 
 
   if (!id) return;
   collectionMemo.set(memoKey, id);
-  try { await redisPipeline(url, token, [['SET', collectionKey(name), id, 'EX', DAY * 30]]); } catch { /* non-fatal */ }
+  try { await redisPipeline(url, token, [['SET', collectionKey(trimmed), id, 'EX', DAY * 30]]); } catch { /* non-fatal */ }
 }
 
-async function reconcileCollection(env: Env, job: Job): Promise<void> {
-  if (!job.country) return;
+/** "Paris, France" lets same-named cities in different countries own separate collections. */
+function cityCollectionName(city: string, country: string): string {
+  return country ? `${city}, ${country}` : city;
+}
+
+/**
+ * The city's collection holds the design's whole catalog — poster, stickers, sheet and mug — so a
+ * shopper who lands on one city sees everything it comes in.
+ */
+async function ensureCityCollection(env: Env, city: string, country: string, offerIds: string[]): Promise<void> {
+  const name = cityCollectionName(city, country);
+  await ensureCollection(env, name, `City Lines Art prints, stickers and gifts from ${name}.`, offerIds);
+}
+
+/**
+ * The country's collection holds only posters: one print per city, no cross-sell noise. A design is
+ * added as a single poster even when its stickers and mug also exist.
+ */
+async function ensureCountryCollection(env: Env, country: string, posterId: string): Promise<void> {
+  if (!country.trim()) return;
+  const name = country.trim();
+  await ensureCollection(env, name, `City Lines Art posters from ${name}.`, [posterId]);
+}
+
+/** Files a completed design: everything under the city, only the poster under the country. */
+async function reconcileCollections(env: Env, job: Job): Promise<void> {
   const designs = await loadDesigns(env, job.hash, EXTRA_KINDS);
-  const ids = [job.posterId, ...EXTRA_KINDS.map((kind) => designs.get(kind)?.productId ?? '')].filter(Boolean);
-  await ensureCollection(env, job.country, ids);
+  const allIds = [job.posterId, ...EXTRA_KINDS.map((kind) => designs.get(kind)?.productId ?? '')].filter(Boolean);
+  await ensureCityCollection(env, job.city, job.country, allIds);
+  await ensureCountryCollection(env, job.country, job.posterId);
 }
 
 async function triggerBackground(env: Env, origin: string, hash: string): Promise<void> {
@@ -690,8 +715,8 @@ async function triggerBackground(env: Env, origin: string, hash: string): Promis
 
 /**
  * Makes the cross-sell products a poster's design does not have yet, then files them under the
- * city's country. Works a bounded slice at a time and hands the rest to a fresh invocation, so it
- * never runs past the function's own time limit.
+ * city's collection and the poster under the country's. Works a bounded slice at a time and hands
+ * the rest to a fresh invocation, so it never runs past the function's own time limit.
  */
 async function runBackground(env: Env, hash: string, origin: string): Promise<void> {
   const url = env.UPSTASH_REDIS_REST_URL!;
@@ -709,7 +734,7 @@ async function runBackground(env: Env, hash: string, origin: string): Promise<vo
 
   const designs = await loadDesigns(env, hash, EXTRA_KINDS);
   if (EXTRA_KINDS.every((kind) => designs.has(kind))) {
-    await reconcileCollection(env, job);
+    await reconcileCollections(env, job);
     await deleteJob(env, hash);
     return;
   }
@@ -733,7 +758,7 @@ async function runBackground(env: Env, hash: string, origin: string): Promise<vo
 
   const after = await loadDesigns(env, hash, EXTRA_KINDS);
   if (EXTRA_KINDS.every((kind) => after.has(kind))) {
-    await reconcileCollection(env, job);
+    await reconcileCollections(env, job);
     await deleteJob(env, hash);
     return;
   }

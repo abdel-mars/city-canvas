@@ -21,8 +21,7 @@ const originalFetch = globalThis.fetch;
 
 let store: Map<string, string>;
 let productPosts: { name: string; productTemplateId: string }[];
-let collectionPosts: { name: string; offerIds: string[] }[];
-let collectionOffers: string[];
+let collections: { id: string; name: string; offerIds: string[] }[];
 let selfChains: string[];
 let failStickerSheet: boolean;
 
@@ -68,13 +67,24 @@ function installFetch() {
       }
       if (method === 'GET' && path.startsWith('/open-api/v1.0/products?')) return resp(200, { results: [] });
       if (method === 'POST' && path === '/open-api/v1.0/collections') {
-        collectionPosts.push({ name: body.name, offerIds: body.offerIds });
-        collectionOffers = [...(body.offerIds ?? [])];
-        return resp(200, { id: 'col_1' });
+        const created = { id: `col_${collections.length + 1}`, name: body.name, offerIds: [...(body.offerIds ?? [])] };
+        collections.push(created);
+        return resp(200, { id: created.id });
       }
-      if (method === 'GET' && path.startsWith('/open-api/v1.0/collections?')) return resp(200, { results: [] });
-      if (method === 'GET' && /^\/open-api\/v1\.0\/collections\/[^/]+$/.test(path)) return resp(200, { offerIds: collectionOffers });
-      if (method === 'PUT' && path.endsWith('/products')) { collectionOffers = [...(body.offerIds ?? [])]; return resp(200, {}); }
+      if (method === 'GET' && path.startsWith('/open-api/v1.0/collections?')) {
+        return resp(200, { results: collections.map((c) => ({ id: c.id, name: c.name })) });
+      }
+      if (method === 'GET' && /^\/open-api\/v1\.0\/collections\/[^/]+$/.test(path)) {
+        const id = path.split('/').pop();
+        const c = collections.find((x) => x.id === id);
+        return resp(200, { offerIds: c ? [...c.offerIds] : [] });
+      }
+      if (method === 'PUT' && path.endsWith('/products')) {
+        const id = path.split('/').slice(-2)[0];
+        const c = collections.find((x) => x.id === id);
+        if (c) c.offerIds = [...(body.offerIds ?? [])];
+        return resp(200, {});
+      }
       throw new Error(`unmocked Fourthwall call ${method} ${path}`);
     }
 
@@ -117,8 +127,7 @@ beforeEach(() => {
   });
   store = new Map();
   productPosts = [];
-  collectionPosts = [];
-  collectionOffers = [];
+  collections = [];
   selfChains = [];
   failStickerSheet = false;
   bgTasks.length = 0;
@@ -132,7 +141,7 @@ afterEach(() => {
 });
 
 describe('background catalog', () => {
-  it('makes the cross-sell products and files them under the country collection', async () => {
+  it('makes the cross-sell products: city collection gets all, country gets only the poster', async () => {
     const hash = 'aa11bb22';
     store.set(`fw:design:image:${hash}`, 'img_1');
     const { res, rec } = makeRes();
@@ -145,9 +154,9 @@ describe('background catalog', () => {
     expect(productPosts.map((p) => p.productTemplateId)).toEqual([
       expect.any(String), STICKER_TEMPLATE, STICKER_SHEET_TEMPLATE, MUG_TEMPLATE,
     ]);
-    expect(collectionPosts).toHaveLength(1);
-    expect(collectionPosts[0].name).toBe('Qastan');
-    expect(collectionPosts[0].offerIds).toEqual(['p_1', 'p_2', 'p_3', 'p_4']);
+    expect(collections.map((c) => c.name)).toEqual(['Qatown, Qastan', 'Qastan']);
+    expect(collections[0].offerIds).toEqual(['p_1', 'p_2', 'p_3', 'p_4']);
+    expect(collections[1].offerIds).toEqual(['p_1']);
     expect(store.has(`fw:job:${hash}`)).toBe(false);
     expect(selfChains).toHaveLength(0);
   });
@@ -155,12 +164,12 @@ describe('background catalog', () => {
   it('reuses everything on a repeat visit and does no new work', async () => {
     const hash = 'dd44ee55';
     store.set(`fw:design:image:${hash}`, 'img_1');
-    await handler(post(hash, 'Qaville', 'Qastan'), makeRes().res);
+    await handler(post(hash, 'Qaville', 'Qadia'), makeRes().res);
     await drainBackground();
     const afterFirst = productPosts.length;
 
     const { res, rec } = makeRes();
-    await handler(post(hash, 'Qaville', 'Qastan'), res);
+    await handler(post(hash, 'Qaville', 'Qadia'), res);
     await drainBackground();
 
     expect(rec.status).toBe(200);
@@ -174,13 +183,26 @@ describe('background catalog', () => {
     store.set(`fw:design:image:${hash}`, 'img_1');
     failStickerSheet = true;
     const { res } = makeRes();
-    await handler(post(hash, 'Qaburg', 'Qastan'), res);
+    await handler(post(hash, 'Qaburg', 'Qaland'), res);
     await drainBackground();
 
     expect(productPosts.map((p) => p.productTemplateId)).toEqual([expect.any(String), STICKER_TEMPLATE]);
-    expect(collectionPosts).toHaveLength(0);
+    expect(collections).toHaveLength(0);
     expect(store.has(`fw:job:${hash}`)).toBe(true);
     expect(selfChains).toHaveLength(1);
     expect(selfChains[0]).toContain(`hash=${hash}`);
+  });
+
+  it('adds only the new poster to a country collection that already exists', async () => {
+    collections.push({ id: 'col_old', name: 'Qarealm', offerIds: ['p_old'] });
+    const hash = 'c0ffee12';
+    store.set(`fw:design:image:${hash}`, 'img_1');
+    await handler(post(hash, 'Qacity', 'Qarealm'), makeRes().res);
+    await drainBackground();
+
+    const country = collections.find((c) => c.name === 'Qarealm')!;
+    expect(country.offerIds).toEqual(['p_old', 'p_1']);
+    const city = collections.find((c) => c.name === 'Qacity, Qarealm')!;
+    expect(city.offerIds).toEqual(['p_1', 'p_2', 'p_3', 'p_4']);
   });
 });
