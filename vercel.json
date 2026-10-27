@@ -5,6 +5,12 @@
     },
     "api/geo.ts": {
       "maxDuration": 60
+    },
+    "api/social-queue.ts": {
+      "maxDuration": 60
+    },
+    "api/social-click.ts": {
+      "maxDuration": 10
     }
   },
   "rewrites": [

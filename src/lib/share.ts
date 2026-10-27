@@ -1,58 +1,90 @@
 import { supabase } from "@/integrations/supabase/client";
-import { generateArtworkBase64 } from "./download";
+import { generateArtworkJpegBase64 } from "./download";
 import { buildWatermarkPayload } from "./watermarkBrowser";
 import { bytesToBase64 } from "./pngText";
+import { shapeForBbox, type PosterShape } from "./posterShape";
+import type { ArtworkSettings, City } from "@/types/artwork";
 
-interface ShareResult {
-  id: string;
-  imageUrl: string;
-  shareUrl: string;
+const MAX_PREFERRED_BASE64 = 2_500_000;
+const MAX_UPLOAD_BASE64 = 3_200_000;
+
+export interface PublishArtworkInput {
+  svgElement: SVGSVGElement;
+  city: City;
+  bbox?: [number, number, number, number];
+  settings: ArtworkSettings;
+  shape?: PosterShape;
 }
 
-export async function createShare(
-  svgElement: SVGSVGElement,
-  cityName: string,
-  settings: Record<string, unknown>,
-  userId: string | null,
-  creatorName: string,
-  creatorEmail: string | null
-): Promise<ShareResult> {
-  // 1. Generate PNG in base64 at 3x scale (optimal for storage and upload payload size).
-  //    The artwork is watermarked during rasterisation; the same payload is sent alongside so the
-  //    row keeps a copy that survives the pixels being stripped or re-encoded.
-  const base64 = await generateArtworkBase64(svgElement, 3);
-  const watermark_payload = bytesToBase64(await buildWatermarkPayload());
+export interface PublishArtworkResult {
+  shareId: string;
+  imageUrl: string;
+  posts: { id: string; platform: "instagram" | "pinterest"; scheduled_at: string }[];
+}
 
-  // 2. Invoke our Supabase Edge Function
-  const { data, error } = await supabase.functions.invoke("create-share", {
-    body: {
-      image_base64: base64,
-      city_name: cityName,
-      settings,
-      user_id: userId,
-      creator_name: creatorName,
-      creator_email: creatorEmail,
-      watermark_payload,
+async function encodeArtwork(svgElement: SVGSVGElement): Promise<string> {
+  let image = await generateArtworkJpegBase64(svgElement, 3);
+  if (image.length > MAX_PREFERRED_BASE64) {
+    image = await generateArtworkJpegBase64(svgElement, 2);
+  }
+  if (image.length > MAX_UPLOAD_BASE64) {
+    throw new Error("Artwork is too large to publish. Try a simpler preset.");
+  }
+  return image;
+}
+
+export async function publishArtwork({
+  svgElement,
+  city,
+  bbox,
+  settings,
+  shape,
+}: PublishArtworkInput): Promise<PublishArtworkResult> {
+  const { data: sessionData } = await supabase.auth.getSession();
+  const token = sessionData.session?.access_token;
+  if (!token) throw new Error("Sign in with the admin account to publish.");
+
+  const [imageBase64, watermarkPayload] = await Promise.all([
+    encodeArtwork(svgElement),
+    buildWatermarkPayload(),
+  ]);
+
+  const response = await fetch("/api/social-queue", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
     },
+    body: JSON.stringify({
+      image_base64: imageBase64,
+      city_name: city.name,
+      city_country: city.country ?? null,
+      settings,
+      shape: shape ?? shapeForBbox(bbox ?? city.boundingBox),
+      watermark_payload: bytesToBase64(watermarkPayload),
+    }),
   });
 
-  if (error) {
-    console.error("Error creating share:", error);
-    throw new Error(error.message || "Failed to create share gallery");
+  if (!response.ok) {
+    let detail = `Publishing failed (${response.status})`;
+    try {
+      const body = (await response.json()) as { error?: string; message?: string };
+      detail = body.message || body.error || detail;
+    } catch {
+      // Keep the status-based message when the response is not JSON.
+    }
+    if (response.status === 401) detail = "Sign in with the admin account to publish.";
+    throw new Error(detail);
   }
 
-  if (!data?.success || !data?.id) {
-    throw new Error("Invalid response from sharing service");
-  }
-
-  // 3. Return the gallery information
-  // Construct the personalized URL slug e.g. /share/abdel/uuid
-  const slug = creatorName ? encodeURIComponent(creatorName.toLowerCase()) : "anonymous";
-  const shareUrl = `${window.location.origin}/share/${slug}/${data.id}`;
-
+  const body = (await response.json()) as {
+    share_id: string;
+    image_url: string;
+    posts: PublishArtworkResult["posts"];
+  };
   return {
-    id: data.id,
-    imageUrl: data.image_url,
-    shareUrl,
+    shareId: body.share_id,
+    imageUrl: body.image_url,
+    posts: body.posts,
   };
 }

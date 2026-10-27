@@ -240,6 +240,22 @@ export async function generateArtworkBase64(
   }
 }
 
+/** JPEG for social publishing: flattened, watermarked, and small enough for an API request body. */
+export async function generateArtworkJpegBase64(
+  svgElement: SVGSVGElement,
+  scale: number = 3,
+  quality: number = 0.9,
+): Promise<string> {
+  const { canvas, ctx, dispose } = await rasterize(svgElement, scale, false);
+
+  try {
+    await stampWatermark(ctx, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', quality).split(',')[1];
+  } finally {
+    dispose();
+  }
+}
+
 /**
  * JPEG quality for the Printify upload. The measured cost of going lower is small — on a Neon
  * poster, 0.92 deviates from the PNG by an RMS of 1.63/255 with only 8.7% extra gradient energy,
