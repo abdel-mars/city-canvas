@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Download, Gift, Loader2 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Download, Gift, Loader2, Send } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -12,6 +13,8 @@ import {
 } from '@/components/ui/alert-dialog';
 import { downloadArtwork, downloadArtworkTransparent, downloadSvg } from '@/lib/download';
 import { giftUrl } from '@/lib/giftParams';
+import { publishArtwork } from '@/lib/share';
+import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { ArtworkSettings, City } from '@/types/artwork';
 
@@ -41,8 +44,11 @@ const FORMAT_OPTIONS: { id: ExportFormat; label: string }[] = [
 ];
 
 const DownloadShare = ({ svgRef, city, bbox, settings, textColor, onTransparentChange }: DownloadShareProps) => {
+  const { isAdmin } = useAuth();
+  const navigate = useNavigate();
   const [format, setFormat] = useState<ExportFormat>('png');
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const filename = city.name.toLowerCase().replace(/\s+/g, '-');
@@ -67,6 +73,30 @@ const DownloadShare = ({ svgRef, city, bbox, settings, textColor, onTransparentC
     setConfirmOpen(false);
     // Record the window that was drawn, not the one that was requested.
     window.open(giftUrl({ ...city, boundingBox: bbox ?? city.boundingBox }, settings), '_blank', 'noopener,noreferrer');
+  };
+
+  const handlePublish = async () => {
+    if (!svgRef.current || isPublishing) return;
+    setIsPublishing(true);
+    try {
+      await publishArtwork({
+        svgElement: svgRef.current,
+        city,
+        bbox,
+        settings,
+      });
+      toast.success('Queued for Instagram and Pinterest', {
+        action: {
+          label: 'Open studio',
+          onClick: () => navigate('/studio/social'),
+        },
+      });
+    } catch (error) {
+      console.error('Publishing failed:', error);
+      toast.error(error instanceof Error ? error.message : 'Publishing failed. Please try again.');
+    } finally {
+      setIsPublishing(false);
+    }
   };
 
   const handleDownload = async () => {
@@ -132,6 +162,21 @@ const DownloadShare = ({ svgRef, city, bbox, settings, textColor, onTransparentC
           )}
           {isDownloading ? 'Preparing…' : 'Download'}
         </button>
+
+        {isAdmin && (
+          <button
+            onClick={handlePublish}
+            disabled={isPublishing}
+            className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-500 transition-colors duration-200 disabled:opacity-50"
+          >
+            {isPublishing ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Send className="w-4 h-4" />
+            )}
+            {isPublishing ? 'Scheduling…' : 'Publish & schedule'}
+          </button>
+        )}
       </div>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>

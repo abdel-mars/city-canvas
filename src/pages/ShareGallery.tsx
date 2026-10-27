@@ -19,6 +19,8 @@ interface ShareData {
   created_at: string;
   creator_name: string;
   creator_email: string | null;
+  thumb_url: string | null;
+  image_purged_at: string | null;
 }
 
 export const ShareGallery: React.FC = () => {
@@ -59,6 +61,10 @@ export const ShareGallery: React.FC = () => {
 
   const handleDownload = async () => {
     if (!shareData) return;
+    if (shareData.image_purged_at) {
+      toast.error("The high-resolution archive has been retired. The preview is still available.");
+      return;
+    }
     setDownloading(true);
     try {
       const res = await fetch(shareData.image_url);
@@ -122,7 +128,9 @@ export const ShareGallery: React.FC = () => {
 
   // Get matching ambient color from settings if available
   const settings = shareData.settings_json || {};
-  const ambientColor = settings.background || "#6366f1"; // default to indigo
+  const ambientColor = settings.background || "#6366f1";
+  const previewUrl = shareData.thumb_url || shareData.image_url;
+  const archived = Boolean(shareData.image_purged_at);
 
   return (
     <div className="min-h-screen bg-zinc-950 flex flex-col items-center justify-between p-6 text-zinc-100 relative overflow-hidden">
@@ -173,7 +181,7 @@ export const ShareGallery: React.FC = () => {
               
               <div className="relative z-10 w-full h-full rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-950 flex items-center justify-center p-2 shadow-inner">
                 <img
-                  src={shareData.image_url}
+                  src={previewUrl}
                   alt={shareData.city_name}
                   className="max-w-full max-h-full object-contain pointer-events-none shadow-md"
                 />
@@ -243,16 +251,25 @@ export const ShareGallery: React.FC = () => {
             </div>
 
             {/* Actions CTA */}
+            {archived && (
+              <p className="rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-xs text-zinc-500">
+                This share now keeps a low-resolution preview. The high-resolution archive has been
+                retired.
+              </p>
+            )}
+
             <div className="flex flex-col sm:flex-row gap-3">
-              <Button
-                onClick={handleDownload}
-                disabled={downloading}
-                className="flex-1 bg-white hover:bg-zinc-100 text-zinc-950 font-bold border-0 px-6 py-5 rounded-full shadow-lg shadow-white/5 transition-all flex items-center justify-center gap-2 shrink-0"
-              >
-                <Download className="w-4 h-4" />
-                {downloading ? "Downloading..." : "Download High-Res"}
-              </Button>
-              
+              {!archived && (
+                <Button
+                  onClick={handleDownload}
+                  disabled={downloading}
+                  className="flex-1 bg-white hover:bg-zinc-100 text-zinc-950 font-bold border-0 px-6 py-5 rounded-full shadow-lg shadow-white/5 transition-all flex items-center justify-center gap-2 shrink-0"
+                >
+                  <Download className="w-4 h-4" />
+                  {downloading ? "Downloading..." : "Download High-Res"}
+                </Button>
+              )}
+
               <Button
                 onClick={() => navigate("/")}
                 className="flex-1 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-bold border-0 px-6 py-5 rounded-full shadow-lg shadow-indigo-600/10 flex items-center justify-center gap-2"
