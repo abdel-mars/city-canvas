@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
+import { isAdminEmail } from "@shared/admin";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
@@ -37,17 +38,13 @@ export const AuthCallback: React.FC = () => {
         }
       }
 
-      // Link any anonymous shares created with this email to the user
-      if (session.user.email) {
-        await supabase
-          .from("shares")
-          .update({ user_id: session.user.id })
-          .eq("creator_email", session.user.email)
-          .is("user_id", null);
-      }
-
-      toast.success("Identity verified successfully! Welcome back.");
-      navigate("/gallery");
+      const admin = isAdminEmail(session.user.email);
+      toast.success(
+        admin
+          ? "Identity verified. Welcome to Social Studio."
+          : "Identity verified successfully! Welcome back.",
+      );
+      navigate(admin ? "/studio/social" : "/");
     }
 
     // 1. Listen for auth state changes (handles PKCE code exchange)

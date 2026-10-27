@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { AuthModal } from "./AuthModal";
 import CitySearch from "./CitySearch";
-import { Compass, User, LogOut, Image, Menu, X } from "lucide-react";
+import { User, LogOut, Sparkles, Menu, X } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { Button } from "@/components/ui/button";
 import { Link, useNavigate } from "react-router-dom";
@@ -19,7 +19,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ onCitySelect, showSearch = false, onLogoClick }) => {
-  const { user, profile, logout, loading } = useAuth();
+  const { user, profile, logout, loading, isAdmin } = useAuth();
   const { theme } = useTheme();
   const [authOpen, setAuthOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -89,24 +89,19 @@ export const Header: React.FC<HeaderProps> = ({ onCitySelect, showSearch = false
           {/* Right Side Actions */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
 
-            {/* Desktop Nav: My Gallery (first — primary action) */}
-            <nav className="hidden md:flex items-center gap-4">
-              <button
-                onClick={() => {
-                  if (user) {
-                    navigate('/gallery');
-                  } else {
-                    setAuthOpen(true);
-                  }
-                }}
-                className={`text-sm font-medium flex items-center gap-1.5 transition-colors duration-300 ${
-                  isDark ? 'text-zinc-400 hover:text-white' : 'text-zinc-500 hover:text-zinc-900'
-                }`}
-              >
-                <Image className="w-4 h-4 text-indigo-500" />
-                My Gallery
-              </button>
-            </nav>
+            {isAdmin && (
+              <nav className="hidden md:flex items-center gap-4">
+                <Link
+                  to="/studio/social"
+                  className={`text-sm font-medium flex items-center gap-1.5 transition-colors duration-300 ${
+                    isDark ? "text-zinc-400 hover:text-white" : "text-zinc-500 hover:text-zinc-900"
+                  }`}
+                >
+                  <Sparkles className="w-4 h-4 text-indigo-500" />
+                  Social Studio
+                </Link>
+              </nav>
+            )}
 
             {/* Theme Toggle Button (utility — after nav) */}
             <ThemeToggle />
@@ -188,24 +183,20 @@ export const Header: React.FC<HeaderProps> = ({ onCitySelect, showSearch = false
                 isDark ? "border-zinc-900 bg-zinc-950" : "border-zinc-200 bg-white"
               }`}
             >
-              <nav className="flex flex-col gap-3">
-                <button
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    if (user) {
-                      navigate('/gallery');
-                    } else {
-                      setAuthOpen(true);
-                    }
-                  }}
-                  className={`text-sm font-medium py-1 flex items-center gap-1.5 text-left transition-colors ${
-                    isDark ? 'text-zinc-400 hover:text-white' : 'text-zinc-500 hover:text-zinc-900'
-                  }`}
-                >
-                  <Image className="w-4 h-4 text-indigo-500" />
-                  My Gallery
-                </button>
-              </nav>
+              {isAdmin && (
+                <nav className="flex flex-col gap-3">
+                  <Link
+                    to="/studio/social"
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={`text-sm font-medium py-1 flex items-center gap-1.5 text-left transition-colors ${
+                      isDark ? "text-zinc-400 hover:text-white" : "text-zinc-500 hover:text-zinc-900"
+                    }`}
+                  >
+                    <Sparkles className="w-4 h-4 text-indigo-500" />
+                    Social Studio
+                  </Link>
+                </nav>
+              )}
 
               <div
                 className={`border-t pt-4 flex flex-col gap-3 ${

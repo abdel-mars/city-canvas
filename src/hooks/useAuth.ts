@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { User } from "@supabase/supabase-js";
+import { isAdminEmail } from "@shared/admin";
 
 export interface Profile {
   id: string;
@@ -100,6 +101,7 @@ export const useAuth = () => {
     user,
     profile,
     loading,
+    isAdmin: isAdminEmail(user?.email),
     sendMagicLink,
     logout,
     refreshProfile: () => user && fetchProfile(user.id),
