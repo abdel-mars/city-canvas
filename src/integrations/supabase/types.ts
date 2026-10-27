@@ -62,6 +62,11 @@ export type Database = {
           is_published: boolean
           watermark_payload: string | null
           watermark_version: number | null
+          city_country: string | null
+          shape: string | null
+          image_path: string | null
+          thumb_url: string | null
+          image_purged_at: string | null
         }
         Insert: {
           id?: string
@@ -75,6 +80,11 @@ export type Database = {
           is_published?: boolean
           watermark_payload?: string | null
           watermark_version?: number | null
+          city_country?: string | null
+          shape?: string | null
+          image_path?: string | null
+          thumb_url?: string | null
+          image_purged_at?: string | null
         }
         Update: {
           id?: string
@@ -88,6 +98,11 @@ export type Database = {
           is_published?: boolean
           watermark_payload?: string | null
           watermark_version?: number | null
+          city_country?: string | null
+          shape?: string | null
+          image_path?: string | null
+          thumb_url?: string | null
+          image_purged_at?: string | null
         }
         Relationships: [
           {
@@ -99,12 +114,195 @@ export type Database = {
           }
         ]
       }
+      social_posts: {
+        Row: {
+          id: string
+          share_id: string
+          platform: "instagram" | "pinterest"
+          status: "pending" | "posting" | "posted" | "failed" | "needs_review" | "cancelled"
+          scheduled_at: string
+          next_attempt_at: string | null
+          locked_at: string | null
+          posted_at: string | null
+          title: string | null
+          description: string | null
+          caption: string | null
+          alt_text: string | null
+          link_url: string | null
+          image_url: string | null
+          media_url: string | null
+          media_path: string | null
+          external_id: string | null
+          external_url: string | null
+          provider_state: Json
+          attempts: number
+          click_count: number
+          last_error: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          share_id: string
+          platform: "instagram" | "pinterest"
+          status?: "pending" | "posting" | "posted" | "failed" | "needs_review" | "cancelled"
+          scheduled_at: string
+          next_attempt_at?: string | null
+          locked_at?: string | null
+          posted_at?: string | null
+          title?: string | null
+          description?: string | null
+          caption?: string | null
+          alt_text?: string | null
+          link_url?: string | null
+          image_url?: string | null
+          media_url?: string | null
+          media_path?: string | null
+          external_id?: string | null
+          external_url?: string | null
+          provider_state?: Json
+          attempts?: number
+          click_count?: number
+          last_error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          share_id?: string
+          platform?: "instagram" | "pinterest"
+          status?: "pending" | "posting" | "posted" | "failed" | "needs_review" | "cancelled"
+          scheduled_at?: string
+          next_attempt_at?: string | null
+          locked_at?: string | null
+          posted_at?: string | null
+          title?: string | null
+          description?: string | null
+          caption?: string | null
+          alt_text?: string | null
+          link_url?: string | null
+          image_url?: string | null
+          media_url?: string | null
+          media_path?: string | null
+          external_id?: string | null
+          external_url?: string | null
+          provider_state?: Json
+          attempts?: number
+          click_count?: number
+          last_error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_posts_share_id_fkey"
+            columns: ["share_id"]
+            isOneToOne: false
+            referencedRelation: "shares"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      social_clicks: {
+        Row: {
+          id: number
+          social_post_id: string | null
+          campaign: string | null
+          platform: "instagram" | "pinterest" | null
+          clicked_at: string
+        }
+        Insert: {
+          id?: never
+          social_post_id?: string | null
+          campaign?: string | null
+          platform?: "instagram" | "pinterest" | null
+          clicked_at?: string
+        }
+        Update: {
+          id?: never
+          social_post_id?: string | null
+          campaign?: string | null
+          platform?: "instagram" | "pinterest" | null
+          clicked_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_clicks_social_post_id_fkey"
+            columns: ["social_post_id"]
+            isOneToOne: false
+            referencedRelation: "social_posts"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      social_credentials: {
+        Row: {
+          platform: "instagram" | "pinterest"
+          access_token: string
+          refresh_token: string | null
+          account_id: string | null
+          expires_at: string | null
+          metadata: Json
+          updated_at: string
+        }
+        Insert: {
+          platform: "instagram" | "pinterest"
+          access_token: string
+          refresh_token?: string | null
+          account_id?: string | null
+          expires_at?: string | null
+          metadata?: Json
+          updated_at?: string
+        }
+        Update: {
+          platform?: "instagram" | "pinterest"
+          access_token?: string
+          refresh_token?: string | null
+          account_id?: string | null
+          expires_at?: string | null
+          metadata?: Json
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      claim_social_posts: {
+        Args: { p_limit?: number }
+        Returns: {
+          id: string
+          share_id: string
+          platform: "instagram" | "pinterest"
+          status: "pending" | "posting" | "posted" | "failed" | "needs_review" | "cancelled"
+          scheduled_at: string
+          next_attempt_at: string | null
+          locked_at: string | null
+          posted_at: string | null
+          title: string | null
+          description: string | null
+          caption: string | null
+          alt_text: string | null
+          link_url: string | null
+          image_url: string | null
+          media_url: string | null
+          media_path: string | null
+          external_id: string | null
+          external_url: string | null
+          provider_state: Json
+          attempts: number
+          click_count: number
+          last_error: string | null
+          created_at: string
+          updated_at: string
+        }[]
+      }
+      is_admin: {
+        Args: Record<PropertyKey, never>
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never

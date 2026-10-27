@@ -44,9 +44,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     try {
       await sendMagicLink(email, cleanUsername || undefined);
       setLinkSent(true);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Magic link request failed:", err);
-      toast.error(err.message || "Something went wrong. Please try again.");
+      toast.error(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }

@@ -15,5 +15,5 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["./**/*.ts", "../server/**/*.ts"]
+  "include": ["./**/*.ts", "../server/**/*.ts", "../shared/**/*.ts"]
 }

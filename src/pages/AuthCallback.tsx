@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -11,7 +12,7 @@ export const AuthCallback: React.FC = () => {
   useEffect(() => {
     if (handledRef.current) return;
 
-    async function handleSession(session: any) {
+    async function handleSession(session: Session) {
       if (handledRef.current) return;
       handledRef.current = true;
 

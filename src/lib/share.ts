@@ -12,7 +12,7 @@ interface ShareResult {
 export async function createShare(
   svgElement: SVGSVGElement,
   cityName: string,
-  settings: Record<string, any>,
+  settings: Record<string, unknown>,
   userId: string | null,
   creatorName: string,
   creatorEmail: string | null

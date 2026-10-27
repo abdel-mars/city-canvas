@@ -16,7 +16,11 @@ interface Artwork {
   id: string;
   city_name: string;
   image_url: string;
-  settings_json: any;
+  settings_json: {
+    background?: string;
+    backgroundColor?: string;
+    [key: string]: unknown;
+  };
   created_at: string;
   is_published?: boolean;
 }
@@ -156,7 +160,7 @@ export const PersonalGallery: React.FC = () => {
         console.error(error);
       } else {
         toast.success("Profile settings saved!");
-        refreshProfile && refreshProfile();
+        refreshProfile?.();
         setShowSettings(false);
       }
     } catch (err) {

@@ -1,4 +1,4 @@
 {
   "extends": "./api/tsconfig.json",
-  "include": ["api", "server"]
+  "include": ["api", "server", "shared"]
 }
