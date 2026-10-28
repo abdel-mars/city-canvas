@@ -53,6 +53,12 @@ const env: SocialEnv = {
   shopUrl: "https://shop.example/",
   trackingEnabled: true,
   cronSecret: "",
+  batchSize: 2,
+  instagramAccessToken: "",
+  instagramUserId: "",
+  pinterestAccessToken: "",
+  pinterestBoardId: "",
+  pinterestBoardSectionId: "",
 };
 
 describe("queue payload validation", () => {

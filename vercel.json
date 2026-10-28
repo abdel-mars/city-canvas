@@ -11,6 +11,10 @@
     },
     "api/social-click.ts": {
       "maxDuration": 10
+    },
+    "api/social-tick.ts": {
+      "maxDuration": 60,
+      "memory": 1024
     }
   },
   "rewrites": [
