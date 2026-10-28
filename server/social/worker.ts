@@ -241,6 +241,9 @@ async function processOne(
       imageUrl,
       credentials,
       env,
+      checkpoint: async (providerState) => {
+        await updatePost(client, post.id, { provider_state: providerState });
+      },
     });
 
     await updatePost(client, post.id, {

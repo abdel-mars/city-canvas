@@ -1,4 +1,5 @@
 import type { SocialPlatform } from "../../../shared/social/types.js";
+import { instagramPublisher } from "./instagram.js";
 import { PublishError, type Publisher } from "./types.js";
 
 const notReady: Publisher = {
@@ -12,7 +13,7 @@ const notReady: Publisher = {
 };
 
 const publishers: Record<SocialPlatform, Publisher> = {
-  instagram: notReady,
+  instagram: instagramPublisher,
   pinterest: notReady,
 };
 

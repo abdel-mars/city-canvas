@@ -19,11 +19,12 @@ export interface PublishContext {
   imageUrl: string;
   credentials: SocialCredentials;
   env: SocialEnv;
+  checkpoint?: (state: Record<string, unknown>) => Promise<void>;
 }
 
 export interface PublishResult {
   externalId: string;
-  externalUrl: string;
+  externalUrl: string | null;
   providerState?: Record<string, unknown>;
 }
 

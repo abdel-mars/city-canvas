@@ -1,6 +1,7 @@
 import type { SocialPlatform } from "./types";
 
 export const SOCIAL_SHOP_URL = "https://citylinesart-shop.fourthwall.com/";
+export const INSTAGRAM_API_VERSION = "v26.0";
 export const SOCIAL_TIMEZONE = "Africa/Casablanca";
 export const SOCIAL_LEAD_MINUTES = 15;
 export const SOCIAL_CLICK_PATH = "/api/social-click";
