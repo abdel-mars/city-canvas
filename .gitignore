@@ -40,5 +40,6 @@ scripts/probe-pricing.ts
 *.sw?
 .vercel
 .env*
+supabase/.temp/
 
 *.tsbuildinfo

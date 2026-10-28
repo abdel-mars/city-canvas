@@ -8,8 +8,7 @@ create table if not exists shares (
 );
 
 -- Enable RLS
-alter table shares enable ro
-w level security;
+alter table shares enable row level security;
 
 -- Anyone can read a share (needed to render /share/:id publicly)
 create policy "Public read"

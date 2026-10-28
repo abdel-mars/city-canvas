@@ -327,6 +327,9 @@ tracking, retention, and deployment caveats.
 
 ### Setup
 
+For the step-by-step [Supabase setup runbook](docs/supabase-setup.md), covering project restore,
+migrations, auth URLs, storage buckets, local verification, Vercel variables, and cron setup.
+
 1. Apply the two social migrations in `supabase/migrations/`.
 2. Set the social environment variables from the configuration table above.
 3. Add Instagram and Pinterest credentials, either as environment variables or rows in

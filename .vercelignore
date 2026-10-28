@@ -1,0 +1,16 @@
+.env
+.env.*
+.env*
+redis.txt
+token-printify.txt
+fourthwall.txt
+secrets*.txt
+*-secret*.txt
+scripts/probe-pricing.ts
+supabase/.temp/
+.vercel
+node_modules
+dist
+dist-ssr
+*.log
+COMPREHENSIVE_PLAN.md

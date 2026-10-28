@@ -1,2 +1,17 @@
-# NOTE: project_id below is stale and must be updated to your live Supabase project ref.
-project_id = "lowigkocwiacsddynjiw"
+project_id = "ximqqlrgcdwhmdzhmbfj"
+
+[auth]
+enabled = true
+site_url = "https://citylines-art.vercel.app"
+additional_redirect_urls = [
+  "http://localhost:3000/auth/callback",
+  "http://127.0.0.1:3000/auth/callback",
+  "http://localhost:8080/auth/callback",
+  "http://127.0.0.1:8080/auth/callback",
+  "https://citylines-art.vercel.app/auth/callback",
+]
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false

@@ -93,6 +93,8 @@ reads `account_id` as the Instagram user id, and Pinterest `metadata.board_id` /
 
 ## Supabase setup
 
+For the full project setup, follow [`supabase-setup.md`](supabase-setup.md) first.
+
 1. Apply the migrations:
    - `supabase/migrations/20261027000000_social_studio.sql`
    - `supabase/migrations/20261027000100_social_admin_actions.sql`
