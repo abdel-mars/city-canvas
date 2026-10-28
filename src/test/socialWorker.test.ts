@@ -52,6 +52,7 @@ const post = (overrides: Partial<ClaimedPost> = {}): ClaimedPost => ({
 
 function fakeClient() {
   const updates: { id: string; values: Record<string, unknown> }[] = [];
+  const removed: string[] = [];
   const client = {
     from() {
       return {
@@ -65,8 +66,18 @@ function fakeClient() {
         },
       };
     },
+    storage: {
+      from() {
+        return {
+          async remove(paths: string[]) {
+            removed.push(...paths);
+            return { error: null };
+          },
+        };
+      },
+    },
   };
-  return { client: client as unknown as SupabaseClient, updates };
+  return { client: client as unknown as SupabaseClient, updates, removed };
 }
 
 function deps(publisher: Publisher, now = new Date("2026-10-27T12:00:00.000Z")): WorkerDeps {
@@ -110,6 +121,11 @@ describe("worker", () => {
       external_id: "ig-1",
       external_url: "https://instagram.com/p/ig-1",
       last_error: null,
+    });
+    expect(fake.removed).toContain("posts/post-1.jpg");
+    expect(fake.updates[1].values).toMatchObject({
+      media_url: null,
+      media_path: null,
     });
   });
 

@@ -86,6 +86,22 @@ async function updatePost(
   if (error) throw new Error(`social post update failed: ${error.message}`);
 }
 
+async function removeVariant(
+  client: SupabaseClient,
+  post: ClaimedPost,
+): Promise<void> {
+  if (!post.media_path) return;
+  try {
+    const { error } = await client.storage
+      .from("social-media")
+      .remove([post.media_path]);
+    if (error) throw new Error(error.message);
+    await updatePost(client, post.id, { media_url: null, media_path: null });
+  } catch (error) {
+    console.error(`social variant cleanup failed for ${post.id}:`, error);
+  }
+}
+
 async function masterImage(client: SupabaseClient, post: ClaimedPost): Promise<{
   bytes: Buffer;
   share: ShareImage;
@@ -256,6 +272,7 @@ async function processOne(
       external_url: result.externalUrl,
       provider_state: result.providerState ?? {},
     });
+    await removeVariant(client, post);
     return "posted";
   } catch (error) {
     console.error(`social post ${post.id} failed:`, error);

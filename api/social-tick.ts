@@ -1,38 +1,17 @@
-import { timingSafeEqual } from "node:crypto";
+import { cronAuthFailure } from "../server/social/cron.js";
 import { hasSupabaseConfig, readSocialEnv } from "../server/social/env.js";
-import { header, type ApiRequest, type ApiResponse } from "../server/social/http.js";
+import type { ApiRequest, ApiResponse } from "../server/social/http.js";
 import { adminClient } from "../server/social/supabase.js";
 import { processClaimedPosts, type ClaimedPost } from "../server/social/worker.js";
-
-function secretMatches(provided: string, expected: string): boolean {
-  const left = Buffer.from(provided);
-  const right = Buffer.from(expected);
-  if (left.length !== right.length) return false;
-  return timingSafeEqual(left, right);
-}
 
 export default async function handler(req: ApiRequest, res: ApiResponse): Promise<void> {
   const env = readSocialEnv();
   res.setHeader("Cache-Control", "no-store");
 
-  if (req.method !== "GET" && req.method !== "POST") {
-    res.status(405).setHeader("Allow", "GET, POST");
-    res.end();
-    return;
-  }
-  if (!env.cronSecret) {
-    res.status(503).json({ error: "social_worker_unconfigured" });
-    return;
-  }
-
-  const authorization = header(req.headers, "authorization") ?? "";
-  const provided =
-    header(req.headers, "x-social-secret") ??
-    (authorization.toLowerCase().startsWith("bearer ")
-      ? authorization.slice(7).trim()
-      : "");
-  if (!secretMatches(provided, env.cronSecret)) {
-    res.status(401).json({ error: "unauthorized" });
+  const authFailure = cronAuthFailure(req, env);
+  if (authFailure) {
+    if (authFailure.allow) res.setHeader("Allow", authFailure.allow);
+    res.status(authFailure.status).json({ error: authFailure.error });
     return;
   }
   if (!hasSupabaseConfig(env)) {
