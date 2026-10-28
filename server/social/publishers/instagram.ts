@@ -1,34 +1,20 @@
 import { INSTAGRAM_API_VERSION } from "../../../shared/social/config.js";
+import {
+  asRecord,
+  fetchWithTimeout,
+  readJson,
+  text,
+  type JsonRecord,
+} from "./http.js";
 import { PublishError, type PublishContext, type PublishResult, type Publisher } from "./types.js";
 
 const GRAPH_BASE = `https://graph.instagram.com/${INSTAGRAM_API_VERSION}`;
-const REQUEST_TIMEOUT_MS = 15_000;
 const POLL_INTERVAL_MS = 3_000;
 const POLL_TIMEOUT_MS = 35_000;
 const ALT_TEXT_LIMIT = 1_000;
 
-type JsonRecord = Record<string, unknown>;
-
-function asRecord(value: unknown): JsonRecord {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as JsonRecord)
-    : {};
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function readJson(response: Response): Promise<JsonRecord> {
-  try {
-    return asRecord(await response.json());
-  } catch {
-    return {};
-  }
 }
 
 async function graphError(response: Response, action: string): Promise<PublishError> {
@@ -53,18 +39,6 @@ async function graphError(response: Response, action: string): Promise<PublishEr
   return new PublishError(`instagram_${response.status}`, message, { needsReview: true });
 }
 
-function requestSignal(): AbortSignal {
-  if (typeof AbortSignal.timeout === "function") {
-    return AbortSignal.timeout(REQUEST_TIMEOUT_MS);
-  }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS) as unknown;
-  if (timer && typeof timer === "object" && "unref" in timer) {
-    (timer as { unref: () => void }).unref();
-  }
-  return controller.signal;
-}
-
 async function request(
   url: string,
   init: RequestInit,
@@ -72,10 +46,7 @@ async function request(
 ): Promise<Response> {
   let response: Response;
   try {
-    response = await fetch(url, {
-      ...init,
-      signal: requestSignal(),
-    });
+    response = await fetchWithTimeout(url, init);
   } catch (error) {
     throw new PublishError(
       "instagram_network",

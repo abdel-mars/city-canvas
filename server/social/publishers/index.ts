@@ -1,25 +1,16 @@
 import type { SocialPlatform } from "../../../shared/social/types.js";
 import { instagramPublisher } from "./instagram.js";
-import { PublishError, type Publisher } from "./types.js";
-
-const notReady: Publisher = {
-  async publish() {
-    throw new PublishError(
-      "publisher_not_ready",
-      "This platform publisher is not configured yet.",
-      { needsReview: true },
-    );
-  },
-};
+import { pinterestPublisher } from "./pinterest.js";
+import type { Publisher } from "./types.js";
 
 const publishers: Record<SocialPlatform, Publisher> = {
   instagram: instagramPublisher,
-  pinterest: notReady,
+  pinterest: pinterestPublisher,
 };
 
 export function publisherFor(platform: SocialPlatform): Publisher {
   return publishers[platform];
 }
 
-export { PublishError };
+export { PublishError } from "./types.js";
 export type { PublishContext, PublishResult, Publisher } from "./types.js";
