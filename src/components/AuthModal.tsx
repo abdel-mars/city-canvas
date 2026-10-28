@@ -85,7 +85,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     isDark ? "text-zinc-500" : "text-zinc-400"
                   }`}
                 >
-                  Access your personal maps and collection gallery. Magic link validation, no password required.
+                  Sign in with the administrator email to open Social Studio. A single-use magic link will be sent to your inbox.
                 </p>
               </div>
 

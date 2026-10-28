@@ -129,7 +129,7 @@ migrations above created the schema fresh.
 
 ### 5. Verify locally
 
-- [x] Open `http://localhost:3000/studio/social` signed out; it redirects to `/`.
+- [x] Open `http://localhost:3000/studio/social` signed out; the admin sign-in gate appears.
 - [x] Sign in as admin; the studio loads with empty counters and no console errors.
 - [x] Confirm anon REST access to `social_posts` returns no rows.
 - [x] Confirm the admin session can read `social_posts`.

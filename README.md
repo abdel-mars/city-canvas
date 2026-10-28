@@ -273,12 +273,13 @@ automatically, and idle slots stay empty. Times are stored in UTC and displayed 
 
 ### Admin flow
 
-1. Generate an artwork and open **Download & share**.
-2. Choose **Publish & schedule**.
-3. The browser renders a JPEG master at 3×, falling back to 2× if it would exceed the upload cap.
-4. `/api/social-queue` uploads the master, creates the share, and queues one Instagram and one
+1. Open `/studio/social` and sign in with the administrator email if prompted.
+2. Generate an artwork and open **Download & share**.
+3. Choose **Publish & schedule**.
+4. The browser renders a JPEG master at 3×, falling back to 2× if it would exceed the upload cap.
+5. `/api/social-queue` uploads the master, creates the share, and queues one Instagram and one
    Pinterest post with copy and tracked links.
-5. Review everything in `/studio/social`: queue, published posts, click counts, last errors, and
+6. Review everything in `/studio/social`: queue, published posts, click counts, last errors, and
    needs-review items. Pending posts can be cancelled or retried.
 
 ### Implementation phases
@@ -358,7 +359,7 @@ server Supabase credentials are missing. They accept `x-social-secret` or a
 | `"Printing is unavailable"` | `PRINTIFY_API_KEY` or `PRINTIFY_SHOP_ID` is unset. |
 | Searches return `429` | 60 requests/hour per IP, shared between search and road loading. Past the cap the proxy serves a stale cached copy when it has one. |
 | Large cities come back empty | The bounding box exceeded `MAX_BBOX_SPAN`. Nominatim returns administrative areas, which can be much bigger than the city. |
-| `/studio/social` redirects home | You are signed in as a non-admin. Only `elmahmoudiabderrahmane@gmail.com` is allowed. |
+| `/studio/social` says the account is not authorized | You are signed in as a non-admin. Sign out and use `elmahmoudiabderrahmane@gmail.com`. |
 | `/api/social-tick` returns `503 social_worker_unconfigured` | `SOCIAL_CRON_SECRET`, `SUPABASE_URL`, or `SUPABASE_SERVICE_ROLE_KEY` is missing. |
 | Social posts stay in `posting` | The worker did not finish. The 10-minute lock lets the next tick reclaim the post; check the Vercel function logs and `pg_cron` job history. |
 | Instagram posts fail with a container timeout or media error | Verify the `social-media` bucket is public and the image URL is reachable, then retry the post from the studio. |
