@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import CitySearch from '@/components/CitySearch';
 import ArtworkCanvas from '@/components/ArtworkCanvas';
@@ -193,6 +194,10 @@ const Index = () => {
               >
                 Mars
               </a>
+              <span aria-hidden="true"> · </span>
+              <Link to="/privacy" className={CREDIT_LINK}>
+                Privacy
+              </Link>
             </motion.p>
           </motion.div>
         ) : (

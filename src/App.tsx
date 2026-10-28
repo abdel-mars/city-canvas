@@ -11,6 +11,7 @@ import { AuthCallback } from "./pages/AuthCallback";
 import { SocialStudio } from "./pages/SocialStudio";
 import GiftPage from "./pages/GiftPage";
 import Verify from "./pages/Verify";
+import Privacy from "./pages/Privacy";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -39,6 +40,7 @@ const App = () => (
             <Route path="/share/:id" element={<ShareGallery />} />
             <Route path="/gift" element={<GiftPage />} />
             <Route path="/verify" element={<Verify />} />
+            <Route path="/privacy" element={<Privacy />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
